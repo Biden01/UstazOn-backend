@@ -134,4 +134,3 @@ class ResetPasswordRequest(BaseModel):
 
 class MessageResponse(BaseModel):
     message: str
-    code: str | None = None  # Для dev-режима возвращаем код

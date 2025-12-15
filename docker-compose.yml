@@ -24,7 +24,9 @@ services:
       DATABASE_URL: postgresql+asyncpg://postgres:postgres@db:5432/ustazon
       SECRET_KEY: your-super-secret-key-change-in-production
       BACKEND_CORS_ORIGINS: '["http://localhost:5173","http://localhost:5174","http://localhost:3000"]'
-      SMS_ENABLED: "false"
+      SMS_ENABLED: "true"
+      MOBIZON_API_KEY: "kz7b484472b8821e192ff2a809043cf21ab9430acddd2a765c4bc96bc7f7d86edd4633"
+      MOBIZON_API_URL: "https://api.mobizon.kz/service"
     ports:
       - "8000:8000"
     depends_on:

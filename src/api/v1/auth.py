@@ -1,7 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.core.config import settings
 from src.core.security import create_access_token, create_refresh_token, decode_token
 from src.db.session import get_db
 from src.schemas.user import (
@@ -92,17 +91,8 @@ async def refresh_token(token_data: TokenRefresh, db: AsyncSession = Depends(get
 async def send_verification_code(
     data: SendCodeRequest, db: AsyncSession = Depends(get_db)
 ):
-    verification = await sms_service.create_verification_code(
-        db, data.phone, purpose="verify"
-    )
-
-    response = MessageResponse(message="Код отправлен на указанный номер")
-
-    # В dev-режиме возвращаем код для тестирования
-    if not settings.SMS_ENABLED:
-        response.code = verification.code
-
-    return response
+    await sms_service.create_verification_code(db, data.phone, purpose="verify")
+    return MessageResponse(message="Код отправлен на указанный номер")
 
 
 @router.post("/verify-phone", response_model=MessageResponse)
@@ -129,21 +119,13 @@ async def forgot_password(data: SendCodeRequest, db: AsyncSession = Depends(get_
         # Не раскрываем, существует ли пользователь
         return MessageResponse(message="Если аккаунт существует, код будет отправлен")
 
-    verification = await sms_service.create_verification_code(
-        db, data.phone, purpose="reset_password"
-    )
-
-    response = MessageResponse(message="Код отправлен на указанный номер")
-
-    if not settings.SMS_ENABLED:
-        response.code = verification.code
-
-    return response
+    await sms_service.create_verification_code(db, data.phone, purpose="reset_password")
+    return MessageResponse(message="Код отправлен на указанный номер")
 
 
 @router.post("/verify-reset-code", response_model=MessageResponse)
 async def verify_reset_code(data: VerifyCodeRequest, db: AsyncSession = Depends(get_db)):
-    is_valid = await sms_service.verify_code(
+    is_valid = await sms_service.check_code_valid(
         db, data.phone, data.code, purpose="reset_password"
     )
     if not is_valid:
@@ -152,23 +134,14 @@ async def verify_reset_code(data: VerifyCodeRequest, db: AsyncSession = Depends(
             detail="Неверный или истёкший код",
         )
 
-    # Создаём новый код для сброса пароля (используется на следующем шаге)
-    verification = await sms_service.create_verification_code(
-        db, data.phone, purpose="reset_confirmed"
-    )
-
-    response = MessageResponse(message="Код подтверждён")
-    if not settings.SMS_ENABLED:
-        response.code = verification.code
-
-    return response
+    return MessageResponse(message="Код подтверждён")
 
 
 @router.post("/reset-password", response_model=MessageResponse)
 async def reset_password(data: ResetPasswordRequest, db: AsyncSession = Depends(get_db)):
-    # Проверяем код подтверждения
+    # Проверяем и используем код
     is_valid = await sms_service.verify_code(
-        db, data.phone, data.code, purpose="reset_confirmed"
+        db, data.phone, data.code, purpose="reset_password"
     )
     if not is_valid:
         raise HTTPException(

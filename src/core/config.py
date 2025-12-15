@@ -30,9 +30,10 @@ class Settings(BaseSettings):
                 return [origin.strip() for origin in v.split(",")]
         return v
 
-    # SMS (заглушка)
+    # SMS (Mobizon)
     SMS_ENABLED: bool = False
-    SMS_API_KEY: str = ""
+    MOBIZON_API_KEY: str = ""
+    MOBIZON_API_URL: str = "https://api.mobizon.kz/service"
 
     class Config:
         env_file = ".env"
