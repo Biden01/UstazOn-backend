@@ -158,3 +158,4 @@ class UserUpdate(BaseModel):
 
 class MessageResponse(BaseModel):
     message: str
+    code: str

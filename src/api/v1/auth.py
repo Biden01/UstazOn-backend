@@ -40,7 +40,7 @@ async def register(user_data: UserCreate, db: AsyncSession = Depends(get_db)):
     # Создаём пользователя
     await user_service.create_user(db, user_data)
 
-    return MessageResponse(message="Регистрация успешна. Пожалуйста, подтвердите номер телефона.")
+    return MessageResponse(message="Регистрация успешна. Пожалуйста, подтвердите номер телефона.", code="REGISTRATION_SUCCESS")
 
 
 @router.post("/login", response_model=Token)
@@ -117,10 +117,10 @@ async def forgot_password(data: SendCodeRequest, db: AsyncSession = Depends(get_
     user = await user_service.get_user_by_phone(db, data.phone)
     if not user:
         # Не раскрываем, существует ли пользователь
-        return MessageResponse(message="Если аккаунт существует, код будет отправлен")
+        return MessageResponse(message="Если аккаунт существует, код будет отправлен", code="CODE_SENT")
 
     await sms_service.create_verification_code(db, data.phone, purpose="reset_password")
-    return MessageResponse(message="Код отправлен на указанный номер")
+    return MessageResponse(message="Код отправлен на указанный номер", code="CODE_SENT")
 
 
 @router.post("/verify-reset-code", response_model=MessageResponse)
@@ -134,7 +134,7 @@ async def verify_reset_code(data: VerifyCodeRequest, db: AsyncSession = Depends(
             detail="Неверный или истёкший код",
         )
 
-    return MessageResponse(message="Код подтверждён")
+    return MessageResponse(message="Код подтверждён", code="CODE_VERIFIED")
 
 
 @router.post("/reset-password", response_model=MessageResponse)
@@ -158,4 +158,4 @@ async def reset_password(data: ResetPasswordRequest, db: AsyncSession = Depends(
 
     await user_service.update_user_password(db, user, data.new_password)
 
-    return MessageResponse(message="Пароль успешно изменён")
+    return MessageResponse(message="Пароль успешно изменён", code="PASSWORD_RESET_SUCCESS")

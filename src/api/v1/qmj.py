@@ -1,7 +1,8 @@
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.deps import get_current_user, get_db
+from src.core.storage import save_document, get_file_extension
 from src.models.user import User
 from src.schemas.qmj import (
     QMJCreate,
@@ -137,7 +138,7 @@ async def delete_qmj(
 @router.post("/{qmj_id}/files", response_model=QMJFileResponse, status_code=status.HTTP_201_CREATED)
 async def add_file_to_qmj(
     qmj_id: int,
-    file_data: QMJFileCreate,
+    file: UploadFile = File(...),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -153,6 +154,14 @@ async def add_file_to_qmj(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You can only add files to your own QMJ",
         )
+
+    try:
+        file_path = await save_document(file)
+        file_size = file.size
+        file_type = get_file_extension(file.filename or "").lstrip(".")
+        file_data = QMJFileCreate(file=file_path, file_size=file_size, file_type=file_type)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
     qmj_file = await qmj_service.add_file_to_qmj(db, qmj_id, file_data, current_user.id)
     return qmj_file
