@@ -1,0 +1,11 @@
+.env
+.idea/
+__pycache__/
+*.pyc
+uploads/
+media/
+static/
+node_modules/
+.DS_Store
+uploads_backup.tar.gz
+

@@ -1,0 +1,54 @@
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: ustazon_db
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: ustazon
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    expose:
+      - "5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      dockerfile: Dockerfile
+    container_name: ustazon_backend
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@db:5432/ustazon
+      SECRET_KEY: your-super-secret-key-change-in-production
+      BACKEND_CORS_ORIGINS: '["http://localhost:5173","http://localhost:5174","http://localhost:3000","https://agynservis.kz","https://www.agynservis.kz"]'
+      SMS_ENABLED: "true"
+      MOBIZON_API_KEY: "kz7b484472b8821e192ff2a809043cf21ab9430acddd2a765c4bc96bc7f7d86edd4633"
+      MOBIZON_API_URL: "https://api.mobizon.kz/service"
+    ports:
+      - "185.129.51.101:8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ./src:/app/src
+      - ./media:/app/media
+      - ./uploads:/app/uploads
+      - ./alembic:/app/alembic
+      - ./alembic.ini:/app/alembic.ini:ro
+      - ../backend_old:/app/backend_old:ro
+      - ./migrate_all.py:/app/migrate_all.py
+      - ./migrate_users.py:/app/migrate_users.py:ro
+      - ./migrate_subjects.py:/app/migrate_subjects.py:ro
+      - ./migrate_templates.py:/app/migrate_templates.py:ro
+      - ./migrate_cards.py:/app/migrate_cards.py:ro
+      - ./migrate_qmj.py:/app/migrate_qmj.py:ro
+      - ./migrate_tests.py:/app/migrate_tests.py:ro
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
