@@ -9,3 +9,4 @@ node_modules/
 .DS_Store
 uploads_backup.tar.gz
 
+.env

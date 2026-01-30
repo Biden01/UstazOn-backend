@@ -20,6 +20,7 @@ class MaterialType(str, enum.Enum):
     TEST = "test"
     HOMEWORK = "homework"
     RUBRIC = "rubric"
+    PRESENTATION = "presentation"
 
 
 class DifficultyLevel(str, enum.Enum):
@@ -53,6 +54,9 @@ class TeachingMaterial(Base):
 
     # Content (JSON structure varies by material_type)
     content: Mapped[dict] = mapped_column(JSON, nullable=False)
+
+    # File path for presentations and other file-based materials
+    file_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
 
     # Additional metadata
     ai_model: Mapped[str | None] = mapped_column(String(50), nullable=True)  # Which AI model generated it

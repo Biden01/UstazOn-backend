@@ -35,6 +35,8 @@ dependencies = [
     "python-pptx (>=1.0.2,<2.0.0)",
     "manim (>=0.19.1,<0.20.0)",
     "itsdangerous (>=2.2.0,<3.0.0)",
+    "redis>=5.0.0",
+
 ]
 
 

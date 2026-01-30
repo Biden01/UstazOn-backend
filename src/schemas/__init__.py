@@ -47,6 +47,13 @@ from src.schemas.test import (
     TestSubmission,
     TestResult,
 )
+from src.schemas.ai_schemas import (
+    PresentationData,
+    TestData,
+    PresentationSlide,
+    QuestionOption,
+    TestQuestion,
+)
 
 __all__ = [
     "UserCreate",
@@ -93,4 +100,9 @@ __all__ = [
     "AnswerPublicResponse",
     "TestSubmission",
     "TestResult",
+    "PresentationData",
+    "TestData",
+    "PresentationSlide",
+    "QuestionOption",
+    "TestQuestion",
 ]

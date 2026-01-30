@@ -4,9 +4,11 @@ AI Chat endpoints
 import logging
 import json
 import re
+import urllib.parse
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, HTTPException, status, Depends, Form, File, UploadFile
-from fastapi.responses import StreamingResponse, FileResponse
+from fastapi.responses import StreamingResponse, FileResponse, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.schemas.ai import (
@@ -14,10 +16,11 @@ from src.schemas.ai import (
     ConversationCreate, ConversationUpdate, ConversationResponse,
     ConversationListItem, SendMessageRequest, SendMessageResponse, MessageResponse
 )
+from src.schemas.ai_schemas import PresentationData, TestData, PresentationGenerateResponse, GammaPresentationResponse, PresentationStatusResponse
 from src.services.ai_service import ai_service
 from src.services.pdf_service import pdf_service
-from src.services.presentation_service import PresentationService
 from src.services.teaching_materials_service import teaching_materials_service
+from src.utils.rate_limiter import rate_limiter
 from src.prompts.teacher_prompts import (
     get_all_prompts_grouped,
     get_quick_prompt,
@@ -29,9 +32,74 @@ from src.crud import conversation as crud_conversation
 from src.db.session import get_db
 from src.api.deps import get_current_user
 from src.models.user import User
+from src.core.config import settings
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+
+def check_rate_limit(user_id: int, resource_type: str) -> None:
+    """
+    Check rate limits based on Task 6 requirements
+    
+    Args:
+        user_id: ID of the requesting user
+        resource_type: Type of resource being accessed (presentation, test, etc.)
+        
+    Raises:
+        HTTPException: If rate limit is exceeded
+    """
+    current_time = datetime.now(timezone.utc)
+    
+    if resource_type == "presentation":
+        # Per user: 10 presentations per hour
+        key = f"rate_limit:presentation:user:{user_id}"
+        is_allowed, retry_after = rate_limiter.is_allowed(
+            key, max_requests=10, window_seconds=3600, user_id=user_id
+        )
+        if not is_allowed:
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail={
+                    "detail": "Rate limit exceeded. Please wait 15 minutes before generating again.",
+                    "retry_after": retry_after
+                }
+            )
+    elif resource_type == "test":
+        # Per user: 20 tests per hour
+        key = f"rate_limit:test:user:{user_id}"
+        is_allowed, retry_after = rate_limiter.is_allowed(
+            key, max_requests=20, window_seconds=3600, user_id=user_id
+        )
+        if not is_allowed:
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail={
+                    "detail": "Rate limit exceeded. Please wait 15 minutes before generating again.",
+                    "retry_after": retry_after
+                }
+            )
+    elif resource_type == "global":
+        # Global: 1000 generations per hour
+        key = "rate_limit:global:generations"
+        is_allowed, retry_after = rate_limiter.is_allowed(
+            key, max_requests=1000, window_seconds=3600
+        )
+        if not is_allowed:
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail={
+                    "detail": "Global rate limit exceeded. Please try again later.",
+                    "retry_after": retry_after
+                }
+            )
+
+
+def log_generation_event(event_data: dict) -> None:
+    """
+    Log generation event according to Task 6 logging strategy
+    """
+    logger.info(f"Generation Event: {json.dumps(event_data)}")
 
 
 def parse_material_request(text: str, request_type: str) -> dict | None:
@@ -99,6 +167,38 @@ def parse_rubric_request(text: str) -> dict | None:
     if result and all(k in result for k in ['subject', 'grade', 'work_type']):
         return result
     return None
+
+
+def _validate_presentation_data(data: dict) -> None:
+    """
+    Validate presentation data structure using Pydantic model
+
+    Args:
+        data: Presentation data dictionary
+
+    Raises:
+        ValueError: If validation fails
+    """
+    try:
+        PresentationData.model_validate(data)
+    except Exception as e:
+        raise ValueError(f"Invalid presentation data: {str(e)}")
+
+
+def _validate_test_data(data: dict) -> None:
+    """
+    Validate test data structure using Pydantic model
+
+    Args:
+        data: Test data dictionary
+
+    Raises:
+        ValueError: If validation fails
+    """
+    try:
+        TestData.model_validate(data)
+    except Exception as e:
+        raise ValueError(f"Invalid test data: {str(e)}")
 
 
 @router.post("/chat", response_model=ChatResponse)
@@ -775,7 +875,11 @@ async def generate_presentation_outline(
     current_user: User = Depends(get_current_user)
 ):
     """
-    Generate outline for presentation
+    Generate outline for presentation (LEGACY - for preview purposes only)
+
+    NOTE: This endpoint generates a JSON outline but does NOT create the actual presentation.
+    Use POST /generate-presentation to create actual presentations via Gamma API.
+
     Returns JSON structure of the presentation
     """
     try:
@@ -828,95 +932,355 @@ async def generate_presentation_outline(
         )
 
 
-@router.post("/generate-presentation")
+@router.post("/generate-presentation", response_model=PresentationGenerateResponse)
 async def generate_presentation(
     subject: str = Form(...),
     grade: str = Form(...),
     topic: str = Form(...),
     slides_count: int = Form(12),
-    outline: str | None = Form(None),
-    model: str = Form("gemini-2.5-flash"),
+    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
     """
-    Генерация презентации PowerPoint для урока
-    
-    If outline is provided (as JSON string), it uses it directly.
-    Otherwise manages full generation cycle.
+    Generate presentation using Gamma API exclusively
+
+    This endpoint uses Gamma API for all presentation generation.
+    Unsplash/Pexels image fetching and python-pptx are NO LONGER used.
+    UNSPLASH_ACCESS_KEY is NOT required for presentations.
+
+    Gamma handles layout, design, and images internally.
+
+    Returns:
+        {"material_id": int, "file_url": str}
     """
     try:
-        import json
-        import urllib.parse
-        from fastapi.responses import Response
-        from src.services.presentation_service import presentation_service
+        check_rate_limit(current_user.id, "presentation")
+        check_rate_limit(current_user.id, "global")
 
-        presentation_data = None
+        from src.services.gamma_service import gamma_service
+        from src.models.teaching_materials import TeachingMaterial, MaterialType
+        import os
+        from pathlib import Path
+        import re
 
-        if outline:
-            # Use provided outline
-            try:
-                presentation_data = json.loads(outline)
-            except json.JSONDecodeError:
-                raise ValueError("Invalid outline JSON provided")
-        else:
-            # Fallback to full generation (Legacy support)
-            # Call generate_presentation_outline logic inline or reuse code
-            # For simplicity, we'll just error or duplicate for now, but 
-            # ideally better to reuse. Let's redirect to outline logic.
-             # Get presentation generation prompt
-            from src.prompts.teacher_prompts import QUICK_PROMPTS
-            import re
-            
-            presentation_prompt = QUICK_PROMPTS["presentation"]["prompt"]
+        def slugify(text):
+            text = text.lower()
+            text = re.sub(r'[^\w\s-]', '', text)
+            text = re.sub(r'[\s_-]+', '_', text)
+            return text.strip('-_')
 
-            user_message = f"""Предмет: {subject}
-Класс: {grade}
-Тема урока: {topic}
-Количество слайдов: {slides_count}
-
-{presentation_prompt}"""
-
-            result = await ai_service.chat(
-                message=user_message,
-                history=None,
-                system_instruction="Ты - эксперт по созданию образовательных презентаций. Верни ТОЛЬКО валидный JSON без дополнительного текста.",
-                model=model
+        if slides_count < 3 or slides_count > 30:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="slides_count must be between 3 and 30"
             )
 
-            ai_response = result["text"].strip()
-            ai_response = re.sub(r'```json\s*', '', ai_response)
-            ai_response = re.sub(r'```\s*$', '', ai_response)
-            ai_response = ai_response.strip()
+        start_time = datetime.now(timezone.utc)
 
-            try:
-                presentation_data = json.loads(ai_response)
-            except json.JSONDecodeError:
-                json_match = re.search(r'\{[\s\S]*\}', ai_response)
-                if json_match:
-                    presentation_data = json.loads(json_match.group())
-                else:
-                    raise ValueError("Failed to parse JSON from AI response")
-
-        # Generate PowerPoint presentation from data
-        pptx_output = presentation_service.create_presentation(presentation_data)
-
-        # Return PPTX as downloadable file
-        safe_filename = f"{topic.replace(' ', '_')}_{grade.replace(' ', '_')}.pptx"
-        encoded_filename = urllib.parse.quote(safe_filename)
-
-        return Response(
-            content=pptx_output.getvalue(),
-            media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
-            headers={
-                "Content-Disposition": f"attachment; filename*=UTF-8''{encoded_filename}"
-            }
+        # Generate presentation using Gamma
+        gamma_result = await gamma_service.generate_presentation(
+            subject=subject,
+            grade=grade,
+            topic=topic,
+            slides_count=slides_count
         )
+
+        # Download presentation file from Gamma
+        presentation_file = await gamma_service.download_presentation(
+            gamma_url=gamma_result.get("id") or gamma_result.get("url"),
+            format="pptx"
+        )
+
+        # Create directory structure
+        safe_subject = slugify(subject)
+        safe_grade = slugify(grade)
+        safe_topic = slugify(topic)
+
+        media_dir = Path("media/presentations")
+        subject_dir = media_dir / safe_subject / safe_grade
+        subject_dir.mkdir(parents=True, exist_ok=True)
+
+        # Save file
+        filename = f"{safe_topic}_{current_user.id}.pptx"
+        file_path = subject_dir / filename
+        relative_path = f"presentations/{safe_subject}/{safe_grade}/{filename}"
+
+        with open(file_path, "wb") as f:
+            f.write(presentation_file.getvalue())
+
+        # Create TeachingMaterial record
+        material = TeachingMaterial(
+            user_id=current_user.id,
+            material_type=MaterialType.PRESENTATION,
+            title=f"Презентация: {topic}",
+            subject=subject,
+            grade=grade,
+            topic=topic,
+            content={
+                "slides_count": slides_count,
+                "generator": "gamma",
+                "gamma_result": gamma_result
+            },
+            file_path=relative_path,
+            ai_model="gamma"
+        )
+        db.add(material)
+        await db.commit()
+        await db.refresh(material)
+
+        end_time = datetime.now(timezone.utc)
+
+        log_generation_event({
+            "timestamp": start_time.isoformat(),
+            "event": "presentation_generation",
+            "user_id": current_user.id,
+            "parameters": {
+                "subject": subject,
+                "grade": grade,
+                "slides_count": slides_count
+            },
+            "ai_provider": "gamma",
+            "total_time_ms": (end_time - start_time).total_seconds() * 1000,
+            "status": "success"
+        })
+
+        return {
+            "material_id": material.id,
+            "file_url": f"{settings.MEDIA_URL}{relative_path}"
+        }
+
+    except HTTPException:
+        log_generation_event({
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "event": "presentation_generation_error",
+            "user_id": current_user.id,
+            "error": "HTTPException occurred",
+            "status": "failed"
+        })
+        raise
     except Exception as e:
+        log_generation_event({
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "event": "presentation_generation_error",
+            "user_id": current_user.id,
+            "error": str(e),
+            "status": "failed"
+        })
         logger.error(f"Error generating presentation: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to generate presentation: {str(e)}"
         )
+
+
+@router.post("/generate-presentation-gamma", response_model=GammaPresentationResponse)
+async def generate_presentation_gamma(
+    subject: str = Form(...),
+    grade: str = Form(...),
+    topic: str = Form(...),
+    slides_count: int = Form(12),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Start an asynchronous presentation generation via Gamma API.
+
+    The endpoint sends a POST to Gamma, receives a generationId,
+    saves the record to the database, and returns immediately.
+    The presentation remains hosted on Gamma and is opened via gammaUrl.
+
+    Returns:
+        {"id": <internal_id>, "gamma_document_id": "<gamma_id>", "status": "generating"}
+    """
+    try:
+        check_rate_limit(current_user.id, "presentation")
+        check_rate_limit(current_user.id, "global")
+
+        from src.services.gamma_service import gamma_service
+        from src.models.teaching_materials import TeachingMaterial, MaterialType
+
+        if slides_count < 3 or slides_count > 30:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="slides_count must be between 3 and 30"
+            )
+
+        start_time = datetime.now(timezone.utc)
+
+        # POST to Gamma — returns generationId immediately
+        try:
+            generation_id = await gamma_service.generate_presentation(
+                subject=subject,
+                grade=grade,
+                topic=topic,
+                slides_count=slides_count
+            )
+        except Exception as e:
+            logger.error(f"Gamma generation failed: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail="Presentation generation service is temporarily unavailable"
+            )
+
+        # Save metadata to DB immediately (status: generating)
+        material = TeachingMaterial(
+            user_id=current_user.id,
+            material_type=MaterialType.PRESENTATION,
+            title=f"Презентация: {topic}",
+            subject=subject,
+            grade=grade,
+            topic=topic,
+            content={
+                "slides_count": slides_count,
+                "generator": "gamma",
+                "gamma_generation_id": str(generation_id),
+                "status": "generating",
+                "gamma_url": None,
+            },
+            ai_model="gamma"
+        )
+        db.add(material)
+        await db.commit()
+        await db.refresh(material)
+
+        log_generation_event({
+            "timestamp": start_time.isoformat(),
+            "event": "presentation_generation_gamma",
+            "user_id": current_user.id,
+            "parameters": {
+                "subject": subject,
+                "grade": grade,
+                "topic": topic,
+                "slides_count": slides_count
+            },
+            "ai_provider": "gamma",
+            "gamma_generation_id": str(generation_id),
+            "status": "started"
+        })
+
+        return {
+            "id": material.id,
+            "gamma_document_id": str(generation_id),
+            "status": "generating"
+        }
+
+    except HTTPException:
+        log_generation_event({
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "event": "presentation_generation_gamma_error",
+            "user_id": current_user.id,
+            "error": "HTTPException occurred",
+            "status": "failed"
+        })
+        raise
+    except Exception as e:
+        log_generation_event({
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "event": "presentation_generation_gamma_error",
+            "user_id": current_user.id,
+            "error": str(e),
+            "status": "failed"
+        })
+        logger.error(f"Error in generate-presentation-gamma: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to generate presentation"
+        )
+
+
+@router.get("/presentations/{presentation_id}/status", response_model=PresentationStatusResponse)
+async def get_presentation_status(
+    presentation_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Check the generation status of a presentation.
+
+    If still generating, polls Gamma API and updates the DB when completed.
+
+    Returns:
+        {"id": <id>, "status": "generating"|"completed"|"failed", "gamma_url": "<url>"|null}
+    """
+    from sqlalchemy import select
+    from src.models.teaching_materials import TeachingMaterial, MaterialType
+
+    result = await db.execute(
+        select(TeachingMaterial).where(
+            TeachingMaterial.id == presentation_id,
+            TeachingMaterial.user_id == current_user.id,
+            TeachingMaterial.material_type == MaterialType.PRESENTATION,
+        )
+    )
+    material = result.scalar_one_or_none()
+
+    if not material:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Presentation not found"
+        )
+
+    content = material.content or {}
+    current_status = content.get("status", "generating")
+
+    # Already resolved — return cached result
+    if current_status in ("completed", "failed"):
+        return {
+            "id": material.id,
+            "status": current_status,
+            "gamma_url": content.get("gamma_url"),
+        }
+
+    # Still generating — poll Gamma for an update
+    generation_id = content.get("gamma_generation_id")
+    if not generation_id:
+        return {
+            "id": material.id,
+            "status": "failed",
+            "gamma_url": None,
+        }
+
+    try:
+        from src.services.gamma_service import gamma_service
+
+        gamma_data = await gamma_service.check_generation_status(generation_id)
+        gamma_status = gamma_data.get("status")
+
+        if gamma_status == "completed":
+            gamma_url = gamma_data.get("gammaUrl")
+            updated_content = {**content, "status": "completed", "gamma_url": gamma_url}
+            material.content = updated_content
+            await db.commit()
+            return {
+                "id": material.id,
+                "status": "completed",
+                "gamma_url": gamma_url,
+            }
+
+        if gamma_status == "failed":
+            updated_content = {**content, "status": "failed"}
+            material.content = updated_content
+            await db.commit()
+            return {
+                "id": material.id,
+                "status": "failed",
+                "gamma_url": None,
+            }
+
+        # Still pending / in-progress
+        return {
+            "id": material.id,
+            "status": "generating",
+            "gamma_url": None,
+        }
+
+    except Exception as e:
+        logger.error(f"Error checking Gamma status for {generation_id}: {e}")
+        return {
+            "id": material.id,
+            "status": "generating",
+            "gamma_url": None,
+        }
 
 
 @router.post("/generate-lesson-plan")
@@ -989,7 +1353,6 @@ async def generate_test(
     question_count: int = Form(15),
     difficulty: str = Form("medium"),
     model: str = Form("gemini-2.5-flash"),
-    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
     """
@@ -1000,45 +1363,117 @@ async def generate_test(
         grade: Класс
         topic: Тема
         question_count: Количество вопросов
-        difficulty: Уровень сложности (easy/medium/hard/mixed)
+        difficulty: Уровень сложности (easy/medium/hard)
         model: AI модель
 
     Returns:
         DOCX файл с тестом
     """
     try:
-        from fastapi.responses import StreamingResponse
-        from src.models.teaching_materials import MaterialType
+        # Apply rate limiting according to Task 6
+        check_rate_limit(current_user.id, "test")
+        check_rate_limit(current_user.id, "global")
 
-        # Generate test using service
-        test_data = await teaching_materials_service.generate_test(
-            subject=subject,
-            grade=grade,
-            topic=topic,
-            question_count=question_count,
-            difficulty=difficulty,
-            model=model,
-            db=db,
-            user_id=current_user.id
+        # Step 1: Request Validation
+        if question_count < 5 or question_count > 50:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="question_count must be between 5 and 50"
+            )
+
+        if difficulty not in ["easy", "medium", "hard"]:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="difficulty must be 'easy', 'medium', or 'hard'"
+            )
+
+        # Step 2: AI Test Generation with retry strategy
+        from src.prompts.teacher_prompts import QUICK_PROMPTS
+        import re
+
+        test_prompt = QUICK_PROMPTS["test"]["prompt"]
+
+        user_message = f"""Предмет: {subject}
+Класс: {grade}
+Тема: {topic}
+Количество вопросов: {question_count}
+Уровень сложности: {difficulty}
+
+{test_prompt}"""
+
+        # Use the AI service's retry strategy
+        test_data = await ai_service.generate_with_retry(
+            prompt=user_message,
+            max_retries=2,
+            system_instruction="Ты - эксперт по созданию образовательных тестов. Верни ТОЛЬКО валидный JSON без дополнительного текста.",
+            model=model
         )
 
-        # Export to DOCX
-        docx_output = teaching_materials_service.export_to_docx(test_data, MaterialType.TEST)
+        # Validate the data using Pydantic schema
+        try:
+            validated_data = TestData.model_validate(test_data)
+            test_data = validated_data.model_dump()
+        except Exception as e:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid test structure: {str(e)}"
+            )
 
-        # Create filename
-        filename = f"Тест_{topic.replace(' ', '_')}_{grade.replace(' ', '_')}.docx"
+        # Step 4: DOCX Assembly
+        from src.services.test_service import create_test_document
 
-        return StreamingResponse(
-            docx_output,
+        start_time = datetime.now(timezone.utc)
+        docx_output = create_test_document(test_data)
+        end_time = datetime.now(timezone.utc)
+
+        # Log generation metrics
+        log_generation_event({
+            "timestamp": start_time.isoformat(),
+            "event": "test_generation",
+            "user_id": current_user.id,
+            "parameters": {
+                "subject": subject,
+                "grade": grade,
+                "question_count": question_count,
+                "difficulty": difficulty
+            },
+            "ai_provider": model,
+            "total_time_ms": (end_time - start_time).total_seconds() * 1000,
+            "file_size_bytes": len(docx_output.getvalue()),
+            "status": "success"
+        })
+
+        # Step 5: Return DOCX
+        safe_filename = f"test_{topic.replace(' ', '_')}_{grade.replace(' ', '_')}.docx"
+        encoded_filename = urllib.parse.quote(safe_filename)
+
+        return Response(
+            content=docx_output.getvalue(),
             media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
             headers={
-                "Content-Disposition": f'attachment; filename="{filename}"'
+                "Content-Disposition": f"attachment; filename*=UTF-8''{encoded_filename}"
             }
         )
 
     except HTTPException:
+        # Log error event
+        log_generation_event({
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "event": "test_generation_error",
+            "user_id": current_user.id,
+            "error": "HTTPException occurred",
+            "status": "failed"
+        })
         raise
     except Exception as e:
+        # Log error event
+        log_generation_event({
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "event": "test_generation_error",
+            "user_id": current_user.id,
+            "error": str(e),
+            "status": "failed"
+        })
         logger.error(f"Error generating test: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

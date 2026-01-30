@@ -1,6 +1,11 @@
 from sqlalchemy import select, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
+from io import BytesIO
+from docx import Document
+from docx.shared import Pt, Cm
+from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_LINE_SPACING
+import logging
 
 from src.models.test import Test, Question, Answer
 from src.schemas.test import (
@@ -13,6 +18,9 @@ from src.schemas.test import (
     TestSubmission,
     TestResult,
 )
+from src.schemas.ai_schemas import TestData
+
+logger = logging.getLogger(__name__)
 
 
 # Test CRUD
@@ -262,3 +270,130 @@ async def grade_test_submission(
         score_percentage=round(score_percentage, 2),
         passed=passed,
     )
+
+
+# Test document generation
+def create_test_document(test_data: dict, include_answers: bool = False) -> BytesIO:
+    """
+    Create a DOCX test document from structured data
+
+    Args:
+        test_data: Dictionary with test structure:
+            {
+                "title": "Test Title",
+                "instructions": "Instructions for students",
+                "questions": [
+                    {
+                        "question_number": 1,
+                        "question_text": "Question text",
+                        "options": [
+                            {"label": "A", "text": "Option A"},
+                            {"label": "B", "text": "Option B"},
+                            {"label": "C", "text": "Option C"},
+                            {"label": "D", "text": "Option D"}
+                        ],
+                        "correct_answer": "A"
+                    }
+                ]
+            }
+        include_answers: Whether to include answer key at the end
+
+    Returns:
+        BytesIO object containing the DOCX file
+    """
+    try:
+        # Validate the test data using Pydantic model
+        validated_data = TestData.model_validate(test_data)
+        
+        doc = Document()
+
+        # Set margins (2cm all sides)
+        sections = doc.sections
+        for section in sections:
+            section.top_margin = Cm(2)
+            section.bottom_margin = Cm(2)
+            section.left_margin = Cm(2)
+            section.right_margin = Cm(2)
+
+        # Add title (centered, bold, 18pt)
+        title = doc.add_paragraph()
+        title.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        title_run = title.add_run(validated_data.title)
+        title_run.bold = True
+        title_run.font.size = Pt(18)
+        title_run.font.name = "Times New Roman"
+
+        # Add spacing after title
+        title.paragraph_format.space_after = Pt(12)
+
+        # Add instructions if present
+        if validated_data.instructions:
+            instr_para = doc.add_paragraph()
+            instr_run = instr_para.add_run(validated_data.instructions)
+            instr_run.font.size = Pt(12)
+            instr_run.font.name = "Times New Roman"
+            instr_run.italic = True
+            instr_para.paragraph_format.space_after = Pt(12)
+            instr_para.paragraph_format.line_spacing_rule = WD_LINE_SPACING.MULTIPLE
+            instr_para.paragraph_format.line_spacing = 1.15
+
+        # Add questions
+        for question in validated_data.questions:
+            # Question number and text (bold, 12pt)
+            q_para = doc.add_paragraph()
+            q_run = q_para.add_run(f"{question.question_number}. {question.question_text}")
+            q_run.bold = True
+            q_run.font.size = Pt(12)
+            q_run.font.name = "Times New Roman"
+            q_para.paragraph_format.space_after = Pt(6)
+            q_para.paragraph_format.line_spacing_rule = WD_LINE_SPACING.MULTIPLE
+            q_para.paragraph_format.line_spacing = 1.15
+
+            # Add options
+            for option in question.options:
+                opt_para = doc.add_paragraph()
+                opt_para.paragraph_format.left_indent = Cm(1)
+                # Radio button placeholder: ○
+                opt_run = opt_para.add_run(f"○  {option.label}) {option.text}")
+                opt_run.font.size = Pt(12)
+                opt_run.font.name = "Times New Roman"
+                opt_para.paragraph_format.space_after = Pt(3)
+                opt_para.paragraph_format.line_spacing_rule = WD_LINE_SPACING.MULTIPLE
+                opt_para.paragraph_format.line_spacing = 1.15
+
+            # Add spacing between questions
+            spacing_para = doc.add_paragraph()
+            spacing_para.paragraph_format.space_after = Pt(12)
+
+        # Add answer key section if requested
+        if include_answers:
+            # Add page break or extra spacing
+            doc.add_paragraph()
+            doc.add_paragraph()
+
+            # Answer key title
+            answer_title = doc.add_paragraph()
+            answer_title_run = answer_title.add_run("Ответы:")
+            answer_title_run.bold = True
+            answer_title_run.font.size = Pt(14)
+            answer_title_run.font.name = "Times New Roman"
+            answer_title.paragraph_format.space_after = Pt(12)
+
+            # List answers
+            for question in validated_data.questions:
+                answer_para = doc.add_paragraph()
+                answer_run = answer_para.add_run(f"{question.question_number}. {question.correct_answer}")
+                answer_run.font.size = Pt(12)
+                answer_run.font.name = "Times New Roman"
+                answer_para.paragraph_format.space_after = Pt(3)
+
+        # Save to BytesIO
+        docx_output = BytesIO()
+        doc.save(docx_output)
+        docx_output.seek(0)
+
+        return docx_output
+
+    except Exception as e:
+        logger.error(f"Error creating test document: {e}")
+        raise

@@ -16,6 +16,9 @@ class Settings(BaseSettings):
         """Get synchronous database URL for Alembic migrations"""
         return self.DATABASE_URL.replace("+asyncpg", "")
 
+    # Redis
+    REDIS_URL: str = ""
+
     # JWT
     SECRET_KEY: str = "your-secret-key-change-in-production"
     ALGORITHM: str = "HS256"
@@ -55,6 +58,12 @@ class Settings(BaseSettings):
     
     # AI (Anthropic)
     ANTHROPIC_API_KEY: str = ""
+
+    # AI (Gamma)
+    GAMMA_API_KEY: str = ""
+
+    # Media files
+    MEDIA_URL: str = "http://localhost:8000/media/"
 
     class Config:
         env_file = ".env"

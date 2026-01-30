@@ -2,13 +2,17 @@
 AI Service for chatbot functionality using Google Gemini API and OpenAI GPT
 """
 import logging
-from typing import Any, AsyncGenerator
+import json
 import asyncio
+from typing import Any, AsyncGenerator
 from functools import partial
+from pydantic import ValidationError
+from fastapi import HTTPException
 
 from google import genai
 from openai import AsyncOpenAI
 from src.core.config import settings
+from src.schemas.ai_schemas import PresentationData, TestData
 
 logger = logging.getLogger(__name__)
 
@@ -552,6 +556,101 @@ class AIService:
                 available[model_id] = {**model_info, "available": is_available}
 
         return available
+
+    async def generate_with_retry(
+        self, 
+        prompt: str, 
+        max_retries: int = 2,
+        system_instruction: str = "You are an expert educational assistant.",
+        model: str = "gemini-2.5-flash"
+    ):
+        """
+        Generate response with retry strategy as specified in Task 6
+        
+        Args:
+            prompt: Input prompt for AI
+            max_retries: Maximum number of retry attempts (default 2)
+            system_instruction: System instruction for the AI
+            model: AI model to use
+            
+        Returns:
+            Validated response data
+        """
+        for attempt in range(max_retries + 1):
+            try:
+                response = await self.chat(
+                    message=prompt,
+                    system_instruction=system_instruction,
+                    model=model
+                )
+                
+                # Attempt to parse and validate the response
+                ai_response = response["text"].strip()
+                
+                # Clean up markdown code blocks
+                import re
+                ai_response = re.sub(r'```json\s*', '', ai_response)
+                ai_response = re.sub(r'```\s*$', '', ai_response)
+                ai_response = ai_response.strip()
+                
+                # Parse JSON
+                try:
+                    data = json.loads(ai_response)
+                except json.JSONDecodeError:
+                    # Try to extract JSON from the response
+                    json_match = re.search(r'\{[\s\S]*\}', ai_response)
+                    if json_match:
+                        data = json.loads(json_match.group())
+                    else:
+                        raise json.JSONDecodeError("Failed to parse JSON from AI response", ai_response, 0)
+                
+                return data
+                
+            except json.JSONDecodeError:
+                if attempt == max_retries:
+                    # Final attempt failed with JSON parsing
+                    raise HTTPException(
+                        status_code=400, 
+                        detail="AI failed to generate valid JSON after retries"
+                    )
+                else:
+                    # On first attempt, try with stricter prompt for next attempt
+                    system_instruction = system_instruction + " Return ONLY valid JSON without any additional text or explanations."
+                    continue
+            except ValidationError as e:
+                if attempt == max_retries:
+                    raise HTTPException(
+                        status_code=400, 
+                        detail=f"AI output validation failed: {str(e)}"
+                    )
+                else:
+                    # Retry with stricter instructions
+                    system_instruction = system_instruction + " Strictly follow the required output format."
+                    continue
+            except asyncio.TimeoutError:
+                if attempt == max_retries:
+                    raise HTTPException(
+                        status_code=504, 
+                        detail="AI generation timeout after retries"
+                    )
+                else:
+                    # Continue to next attempt
+                    continue
+            except Exception as e:
+                if attempt == max_retries:
+                    raise HTTPException(
+                        status_code=500, 
+                        detail=f"AI generation failed: {str(e)}"
+                    )
+                else:
+                    # Continue to next attempt
+                    continue
+                    
+        # This should never be reached due to the loop condition
+        raise HTTPException(
+            status_code=500, 
+            detail="AI generation failed after maximum retries"
+        )
 
 
 # Global AI service instance

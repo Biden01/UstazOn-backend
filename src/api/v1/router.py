@@ -8,6 +8,7 @@ from src.api.v1.uploads import router as uploads_router
 from src.api.v1.tests import router as tests_router
 from src.api.v1.qmj import router as qmj_router
 from src.api.v1.ai import router as ai_router
+from src.api.v1.teaching_materials import router as teaching_materials_router
 
 api_router = APIRouter()
 api_router.include_router(auth_router)
@@ -18,3 +19,4 @@ api_router.include_router(uploads_router, prefix="/uploads", tags=["uploads"])
 api_router.include_router(tests_router, prefix="/tests", tags=["tests"])
 api_router.include_router(qmj_router, prefix="/qmj", tags=["qmj"])
 api_router.include_router(ai_router, prefix="/ai", tags=["ai"])
+api_router.include_router(teaching_materials_router, prefix="/teaching-materials", tags=["teaching-materials"])
