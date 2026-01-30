@@ -5,19 +5,9 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="a72937ed-d58d-4937-b841-5999ba27f204" name="Changes" comment="">
-      <change beforePath="$PROJECT_DIR$/.env" beforeDir="false" afterPath="$PROJECT_DIR$/.env" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/.env.example" beforeDir="false" afterPath="$PROJECT_DIR$/.env.example" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/docker-compose.yml" beforeDir="false" afterPath="$PROJECT_DIR$/docker-compose.yml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/poetry.lock" beforeDir="false" afterPath="$PROJECT_DIR$/poetry.lock" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/pyproject.toml" beforeDir="false" afterPath="$PROJECT_DIR$/pyproject.toml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/src/api/v1/ai.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/api/v1/ai.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/api/v1/router.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/api/v1/router.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/core/config.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/core/config.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/models/teaching_materials.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/models/teaching_materials.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/schemas/ai_schemas.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/schemas/ai_schemas.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/services/image_service.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/services/presentation_service.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/api/v1/teaching_materials.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/api/v1/teaching_materials.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />

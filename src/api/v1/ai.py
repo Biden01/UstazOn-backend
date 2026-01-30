@@ -1,6 +1,7 @@
 """
 AI Chat endpoints
 """
+import asyncio
 import logging
 import json
 import re
@@ -932,148 +933,60 @@ async def generate_presentation_outline(
         )
 
 
-@router.post("/generate-presentation", response_model=PresentationGenerateResponse)
-async def generate_presentation(
-    subject: str = Form(...),
-    grade: str = Form(...),
-    topic: str = Form(...),
-    slides_count: int = Form(12),
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
-):
+@router.post("/generate-presentation")
+async def generate_presentation_legacy():
+    """Legacy endpoint — removed. Use POST /generate-presentation-gamma instead."""
+    raise HTTPException(
+        status_code=status.HTTP_410_GONE,
+        detail="This endpoint has been removed. Use /ai/generate-presentation-gamma"
+    )
+
+
+async def _gamma_background_task(material_id: int, subject: str, grade: str, topic: str, slides_count: int, user_id: int):
     """
-    Generate presentation using Gamma API exclusively
-
-    This endpoint uses Gamma API for all presentation generation.
-    Unsplash/Pexels image fetching and python-pptx are NO LONGER used.
-    UNSPLASH_ACCESS_KEY is NOT required for presentations.
-
-    Gamma handles layout, design, and images internally.
-
-    Returns:
-        {"material_id": int, "file_url": str}
+    Background task: POST to Gamma, then update the DB record with generationId + status.
+    Runs outside the request lifecycle via asyncio.create_task.
     """
-    try:
-        check_rate_limit(current_user.id, "presentation")
-        check_rate_limit(current_user.id, "global")
+    from src.db.session import async_session_maker
+    from src.models.teaching_materials import TeachingMaterial
+    from src.services.gamma_service import gamma_service
+    from sqlalchemy.orm.attributes import flag_modified
 
-        from src.services.gamma_service import gamma_service
-        from src.models.teaching_materials import TeachingMaterial, MaterialType
-        import os
-        from pathlib import Path
-        import re
-
-        def slugify(text):
-            text = text.lower()
-            text = re.sub(r'[^\w\s-]', '', text)
-            text = re.sub(r'[\s_-]+', '_', text)
-            return text.strip('-_')
-
-        if slides_count < 3 or slides_count > 30:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail="slides_count must be between 3 and 30"
+    async with async_session_maker() as db:
+        try:
+            generation_id = await gamma_service.generate_presentation(
+                subject=subject,
+                grade=grade,
+                topic=topic,
+                slides_count=slides_count,
             )
 
-        start_time = datetime.now(timezone.utc)
+            material = await db.get(TeachingMaterial, material_id)
+            if material:
+                content = dict(material.content or {})
+                content["gamma_generation_id"] = str(generation_id)
+                content["status"] = "generating"
+                material.content = content
+                flag_modified(material, "content")
+                await db.commit()
 
-        # Generate presentation using Gamma
-        gamma_result = await gamma_service.generate_presentation(
-            subject=subject,
-            grade=grade,
-            topic=topic,
-            slides_count=slides_count
-        )
+            logger.info(f"Gamma generation started for material {material_id}: {generation_id}")
 
-        # Download presentation file from Gamma
-        presentation_file = await gamma_service.download_presentation(
-            gamma_url=gamma_result.get("id") or gamma_result.get("url"),
-            format="pptx"
-        )
-
-        # Create directory structure
-        safe_subject = slugify(subject)
-        safe_grade = slugify(grade)
-        safe_topic = slugify(topic)
-
-        media_dir = Path("media/presentations")
-        subject_dir = media_dir / safe_subject / safe_grade
-        subject_dir.mkdir(parents=True, exist_ok=True)
-
-        # Save file
-        filename = f"{safe_topic}_{current_user.id}.pptx"
-        file_path = subject_dir / filename
-        relative_path = f"presentations/{safe_subject}/{safe_grade}/{filename}"
-
-        with open(file_path, "wb") as f:
-            f.write(presentation_file.getvalue())
-
-        # Create TeachingMaterial record
-        material = TeachingMaterial(
-            user_id=current_user.id,
-            material_type=MaterialType.PRESENTATION,
-            title=f"Презентация: {topic}",
-            subject=subject,
-            grade=grade,
-            topic=topic,
-            content={
-                "slides_count": slides_count,
-                "generator": "gamma",
-                "gamma_result": gamma_result
-            },
-            file_path=relative_path,
-            ai_model="gamma"
-        )
-        db.add(material)
-        await db.commit()
-        await db.refresh(material)
-
-        end_time = datetime.now(timezone.utc)
-
-        log_generation_event({
-            "timestamp": start_time.isoformat(),
-            "event": "presentation_generation",
-            "user_id": current_user.id,
-            "parameters": {
-                "subject": subject,
-                "grade": grade,
-                "slides_count": slides_count
-            },
-            "ai_provider": "gamma",
-            "total_time_ms": (end_time - start_time).total_seconds() * 1000,
-            "status": "success"
-        })
-
-        return {
-            "material_id": material.id,
-            "file_url": f"{settings.MEDIA_URL}{relative_path}"
-        }
-
-    except HTTPException:
-        log_generation_event({
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-            "event": "presentation_generation_error",
-            "user_id": current_user.id,
-            "error": "HTTPException occurred",
-            "status": "failed"
-        })
-        raise
-    except Exception as e:
-        log_generation_event({
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-            "event": "presentation_generation_error",
-            "user_id": current_user.id,
-            "error": str(e),
-            "status": "failed"
-        })
-        logger.error(f"Error generating presentation: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to generate presentation: {str(e)}"
-        )
+        except Exception as e:
+            logger.error(f"Gamma background task failed for material {material_id}: {e}")
+            try:
+                material = await db.get(TeachingMaterial, material_id)
+                if material:
+                    content = dict(material.content or {})
+                    content["status"] = "failed"
+                    material.content = content
+                    flag_modified(material, "content")
+                    await db.commit()
+            except Exception as db_err:
+                logger.error(f"Failed to update material {material_id} to failed: {db_err}")
 
 
-@router.post("/generate-presentation-gamma", response_model=GammaPresentationResponse)
+@router.post("/generate-presentation-gamma", response_model=GammaPresentationResponse, status_code=202)
 async def generate_presentation_gamma(
     subject: str = Form(...),
     grade: str = Form(...),
@@ -1085,44 +998,25 @@ async def generate_presentation_gamma(
     """
     Start an asynchronous presentation generation via Gamma API.
 
-    The endpoint sends a POST to Gamma, receives a generationId,
-    saves the record to the database, and returns immediately.
-    The presentation remains hosted on Gamma and is opened via gammaUrl.
+    Saves a DB record with status "pending" and fires a background task
+    to call Gamma. Returns 202 Accepted immediately.
 
     Returns:
-        {"id": <internal_id>, "gamma_document_id": "<gamma_id>", "status": "generating"}
+        {"id": <internal_id>, "gamma_document_id": "", "status": "pending"}
     """
     try:
         check_rate_limit(current_user.id, "presentation")
         check_rate_limit(current_user.id, "global")
 
-        from src.services.gamma_service import gamma_service
         from src.models.teaching_materials import TeachingMaterial, MaterialType
 
-        if slides_count < 3 or slides_count > 30:
+        if slides_count < 3 or slides_count > 15:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail="slides_count must be between 3 and 30"
             )
 
-        start_time = datetime.now(timezone.utc)
-
-        # POST to Gamma — returns generationId immediately
-        try:
-            generation_id = await gamma_service.generate_presentation(
-                subject=subject,
-                grade=grade,
-                topic=topic,
-                slides_count=slides_count
-            )
-        except Exception as e:
-            logger.error(f"Gamma generation failed: {e}")
-            raise HTTPException(
-                status_code=status.HTTP_502_BAD_GATEWAY,
-                detail="Presentation generation service is temporarily unavailable"
-            )
-
-        # Save metadata to DB immediately (status: generating)
+        # Save record immediately with status "pending" (Gamma not called yet)
         material = TeachingMaterial(
             user_id=current_user.id,
             material_type=MaterialType.PRESENTATION,
@@ -1133,8 +1027,8 @@ async def generate_presentation_gamma(
             content={
                 "slides_count": slides_count,
                 "generator": "gamma",
-                "gamma_generation_id": str(generation_id),
-                "status": "generating",
+                "gamma_generation_id": "",
+                "status": "pending",
                 "gamma_url": None,
             },
             ai_model="gamma"
@@ -1143,44 +1037,41 @@ async def generate_presentation_gamma(
         await db.commit()
         await db.refresh(material)
 
+        # Fire background task — endpoint does NOT wait for Gamma
+        asyncio.create_task(
+            _gamma_background_task(
+                material_id=material.id,
+                subject=subject,
+                grade=grade,
+                topic=topic,
+                slides_count=slides_count,
+                user_id=current_user.id,
+            )
+        )
+
         log_generation_event({
-            "timestamp": start_time.isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "event": "presentation_generation_gamma",
             "user_id": current_user.id,
             "parameters": {
                 "subject": subject,
                 "grade": grade,
                 "topic": topic,
-                "slides_count": slides_count
+                "slides_count": slides_count,
             },
             "ai_provider": "gamma",
-            "gamma_generation_id": str(generation_id),
-            "status": "started"
+            "status": "pending"
         })
 
         return {
             "id": material.id,
-            "gamma_document_id": str(generation_id),
-            "status": "generating"
+            "gamma_document_id": "",
+            "status": "pending"
         }
 
     except HTTPException:
-        log_generation_event({
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-            "event": "presentation_generation_gamma_error",
-            "user_id": current_user.id,
-            "error": "HTTPException occurred",
-            "status": "failed"
-        })
         raise
     except Exception as e:
-        log_generation_event({
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-            "event": "presentation_generation_gamma_error",
-            "user_id": current_user.id,
-            "error": str(e),
-            "status": "failed"
-        })
         logger.error(f"Error in generate-presentation-gamma: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -1221,7 +1112,7 @@ async def get_presentation_status(
         )
 
     content = material.content or {}
-    current_status = content.get("status", "generating")
+    current_status = content.get("status", "pending")
 
     # Already resolved — return cached result
     if current_status in ("completed", "failed"):
@@ -1231,25 +1122,58 @@ async def get_presentation_status(
             "gamma_url": content.get("gamma_url"),
         }
 
-    # Still generating — poll Gamma for an update
+    from sqlalchemy.orm.attributes import flag_modified
+
+    # Still pending (background task hasn't set generation_id yet) — nothing to poll
     generation_id = content.get("gamma_generation_id")
+
     if not generation_id:
         return {
             "id": material.id,
-            "status": "failed",
+            "status": "pending",
+            "gamma_url": None,
+        }
+
+    if generation_id and current_status == "pending":
+        content["status"] = "generating"
+        material.content = content
+        flag_modified(material, "content")
+        await db.commit()
+
+        return {
+            "id": material.id,
+            "status": "generating",
             "gamma_url": None,
         }
 
     try:
         from src.services.gamma_service import gamma_service
+        from sqlalchemy.orm.attributes import flag_modified
 
         gamma_data = await gamma_service.check_generation_status(generation_id)
-        gamma_status = gamma_data.get("status")
+        gamma_status = (
+                gamma_data.get("status")
+                or gamma_data.get("state")
+                or gamma_data.get("phase")
+        )
+        logger.info(f"Gamma status for {generation_id}: {gamma_data}")
 
         if gamma_status == "completed":
-            gamma_url = gamma_data.get("gammaUrl")
+            gamma_url = (
+                    gamma_data.get("gammaUrl")
+                    or gamma_data.get("url")
+                    or gamma_data.get("documentUrl")
+            )
+            if not gamma_url:
+                logger.error(f"Gamma completed but no URL: {gamma_data}")
+                return {
+                    "id": material.id,
+                    "status": "generating",
+                    "gamma_url": None,
+                }
             updated_content = {**content, "status": "completed", "gamma_url": gamma_url}
             material.content = updated_content
+            flag_modified(material, "content")
             await db.commit()
             return {
                 "id": material.id,
@@ -1257,9 +1181,11 @@ async def get_presentation_status(
                 "gamma_url": gamma_url,
             }
 
+
         if gamma_status == "failed":
             updated_content = {**content, "status": "failed"}
             material.content = updated_content
+            flag_modified(material, "content")
             await db.commit()
             return {
                 "id": material.id,
@@ -1267,7 +1193,7 @@ async def get_presentation_status(
                 "gamma_url": None,
             }
 
-        # Still pending / in-progress
+        # Gamma returns "pending" while still processing
         return {
             "id": material.id,
             "status": "generating",

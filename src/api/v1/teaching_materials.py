@@ -59,7 +59,7 @@ async def get_my_teaching_materials(
             # For presentations: include gamma_url and generation status
             if m.material_type == MaterialType.PRESENTATION and isinstance(m.content, dict):
                 item["gamma_url"] = m.content.get("gamma_url")
-                item["status"] = m.content.get("status", "generating")
+                item["status"] = m.content.get("status", "pending")
             result.append(item)
         return result
 
