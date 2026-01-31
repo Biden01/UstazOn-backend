@@ -19,8 +19,78 @@ from src.schemas.test import (
     TestResult,
 )
 from src.schemas.ai_schemas import TestData
+from src.models.test import DifficultyLevel
 
 logger = logging.getLogger(__name__)
+
+
+async def generate_and_save_test(
+    db: AsyncSession,
+    user_id: int,
+    subject: str,
+    grade: str,
+    topic: str,
+    question_count: int,
+    difficulty: str,
+    model: str = "gemini-2.5-flash",
+) -> Test:
+    """
+    Generate a test using AI and save it to the database.
+
+    1. Calls AI to generate structured test JSON
+    2. Validates via TestData schema
+    3. Transforms to TestCreate format
+    4. Persists using create_test()
+    """
+    from src.services.ai_service import ai_service
+    from src.prompts.teacher_prompts import QUICK_PROMPTS
+
+    test_prompt = QUICK_PROMPTS["test"]["prompt"]
+
+    user_message = f"""Предмет: {subject}
+Класс: {grade}
+Тема: {topic}
+Количество вопросов: {question_count}
+Уровень сложности: {difficulty}
+
+{test_prompt}"""
+
+    raw_data = await ai_service.generate_with_retry(
+        prompt=user_message,
+        max_retries=2,
+        system_instruction=(
+            "Ты - эксперт по созданию образовательных тестов. "
+            "Верни ТОЛЬКО валидный JSON без дополнительного текста.\n"
+            "Каждый option ОБЯЗАН содержать ТОЛЬКО ключи \"label\" и \"text\". "
+            "НИКОГДА не используй \"text_answer\" — используй \"text\".\n"
+            "Каждый вопрос должен содержать ровно 4 варианта ответа."
+        ),
+        model=model,
+    )
+
+    validated = TestData.model_validate(raw_data)
+
+    questions = []
+    for q in validated.questions:
+        answers = []
+        for opt in q.options:
+            answers.append(
+                AnswerCreate(
+                    text=opt.text,
+                    is_correct=(opt.label == q.correct_answer),
+                )
+            )
+        questions.append(QuestionCreate(text=q.question_text, answers=answers))
+
+    test_create = TestCreate(
+        title=validated.title,
+        subject=subject,
+        difficulty=DifficultyLevel(difficulty),
+        questions=questions,
+    )
+
+    test = await create_test(db, test_create, user_id)
+    return test
 
 
 # Test CRUD
@@ -80,7 +150,7 @@ async def create_test(db: AsyncSession, test_data: TestCreate, user_id: int) -> 
     # Create questions with answers
     for q_idx, q_data in enumerate(questions_data):
         answers_data = q_data.answers
-        question_dict = q_data.model_dump(exclude={"answers"})
+        question_dict = q_data.model_dump(exclude={"answers", "order"})
         question = Question(**question_dict, test_id=test.id, order=q_idx)
         db.add(question)
         await db.flush()  # Get question ID
@@ -88,7 +158,7 @@ async def create_test(db: AsyncSession, test_data: TestCreate, user_id: int) -> 
         # Create answers
         for a_idx, a_data in enumerate(answers_data):
             answer = Answer(
-                **a_data.model_dump(), question_id=question.id, order=a_idx
+                **a_data.model_dump(exclude={"order"}), question_id=question.id, order=a_idx
             )
             db.add(answer)
 

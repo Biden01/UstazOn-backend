@@ -1407,6 +1407,89 @@ async def generate_test(
         )
 
 
+@router.post("/generate-test-db", status_code=status.HTTP_201_CREATED)
+async def generate_test_to_db(
+    subject: str = Form(...),
+    grade: str = Form(...),
+    topic: str = Form(...),
+    question_count: int = Form(15),
+    difficulty: str = Form("medium"),
+    model: str = Form("gemini-2.5-flash"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Generate a test using AI and save it to the database.
+
+    Returns the created test with all questions and answers.
+    """
+    try:
+        check_rate_limit(current_user.id, "test")
+        check_rate_limit(current_user.id, "global")
+
+        if question_count < 5 or question_count > 50:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="question_count must be between 5 and 50",
+            )
+
+        if difficulty not in ["easy", "medium", "hard"]:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="difficulty must be 'easy', 'medium', or 'hard'",
+            )
+
+        from src.services.test_service import generate_and_save_test
+
+        test = await generate_and_save_test(
+            db=db,
+            user_id=current_user.id,
+            subject=subject,
+            grade=grade,
+            topic=topic,
+            question_count=question_count,
+            difficulty=difficulty,
+            model=model,
+        )
+
+        from src.services.test_service import get_test_by_id
+        full_test = await get_test_by_id(db, test.id)
+
+        log_generation_event({
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "event": "test_db_generation",
+            "user_id": current_user.id,
+            "parameters": {
+                "subject": subject,
+                "grade": grade,
+                "question_count": question_count,
+                "difficulty": difficulty,
+            },
+            "ai_provider": model,
+            "test_id": test.id,
+            "status": "success",
+        })
+
+        from src.schemas.test import TestDetailResponse
+        return TestDetailResponse.model_validate(full_test)
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        log_generation_event({
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "event": "test_db_generation_error",
+            "user_id": current_user.id,
+            "error": str(e),
+            "status": "failed",
+        })
+        logger.error(f"Error generating test to DB: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to generate test: {str(e)}",
+        )
+
+
 @router.post("/generate-homework")
 async def generate_homework(
     subject: str = Form(...),
