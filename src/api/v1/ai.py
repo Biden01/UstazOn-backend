@@ -1278,7 +1278,7 @@ async def generate_test(
     topic: str = Form(...),
     question_count: int = Form(15),
     difficulty: str = Form("medium"),
-    model: str = Form("gemini-2.5-flash"),
+    model: str = Form("gpt-4o-mini"),
     current_user: User = Depends(get_current_user)
 ):
     """
@@ -1335,15 +1335,36 @@ async def generate_test(
             model=model
         )
 
-        # Validate the data using Pydantic schema
+        # Validate the data using Pydantic schema (with LLM typo repair)
+        from pydantic import ValidationError as PydanticValidationError
+        from src.utils.llm_repair import normalize_test_data
+
         try:
             validated_data = TestData.model_validate(test_data)
             test_data = validated_data.model_dump()
-        except Exception as e:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Invalid test structure: {str(e)}"
+        except PydanticValidationError as first_err:
+            logger.warning(
+                "TestData validation failed on raw LLM output, attempting repair. "
+                "Raw data: %s | Error: %s",
+                test_data,
+                first_err,
             )
+            normalized = normalize_test_data(test_data)
+            logger.info("Normalized LLM output: %s", normalized)
+            try:
+                validated_data = TestData.model_validate(normalized)
+                test_data = validated_data.model_dump()
+            except PydanticValidationError:
+                logger.error(
+                    "TestData validation failed after repair. "
+                    "Normalized data: %s | Original error: %s",
+                    normalized,
+                    first_err,
+                )
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Invalid test structure: {str(first_err)}"
+                )
 
         # Step 4: DOCX Assembly
         from src.services.test_service import create_test_document
@@ -1414,7 +1435,7 @@ async def generate_test_to_db(
     topic: str = Form(...),
     question_count: int = Form(15),
     difficulty: str = Form("medium"),
-    model: str = Form("gemini-2.5-flash"),
+    model: str = Form("gpt-4o-mini"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -1470,8 +1491,8 @@ async def generate_test_to_db(
             "status": "success",
         })
 
-        from src.schemas.test import TestDetailResponse
-        return TestDetailResponse.model_validate(full_test)
+        from src.schemas.test import TestResponse
+        return TestResponse.model_validate(full_test)
 
     except HTTPException:
         raise

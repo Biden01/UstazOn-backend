@@ -20,8 +20,44 @@ from src.schemas.test import (
 )
 from src.schemas.ai_schemas import TestData
 from src.models.test import DifficultyLevel
+from src.utils.llm_repair import normalize_test_data
 
 logger = logging.getLogger(__name__)
+
+
+def _validate_test_data_with_repair(raw_data: dict) -> TestData:
+    """
+    Validate LLM output against TestData schema with a single repair retry.
+
+    1. Try strict validation.
+    2. On ValidationError → normalize known typos → retry once.
+    3. If still invalid → raise the *original* ValidationError.
+    """
+    from pydantic import ValidationError
+
+    try:
+        return TestData.model_validate(raw_data)
+    except ValidationError as first_err:
+        logger.warning(
+            "TestData validation failed on raw LLM output, attempting repair. "
+            "Raw data: %s | Error: %s",
+            raw_data,
+            first_err,
+        )
+
+    normalized = normalize_test_data(raw_data)
+    logger.info("Normalized LLM output: %s", normalized)
+
+    try:
+        return TestData.model_validate(normalized)
+    except ValidationError:
+        logger.error(
+            "TestData validation failed after repair. "
+            "Normalized data: %s | Original error: %s",
+            normalized,
+            first_err,
+        )
+        raise first_err
 
 
 async def generate_and_save_test(
@@ -32,7 +68,7 @@ async def generate_and_save_test(
     topic: str,
     question_count: int,
     difficulty: str,
-    model: str = "gemini-2.5-flash",
+    model: str = "claude-3-5-sonnet-latest",
 ) -> Test:
     """
     Generate a test using AI and save it to the database.
@@ -68,7 +104,7 @@ async def generate_and_save_test(
         model=model,
     )
 
-    validated = TestData.model_validate(raw_data)
+    validated = _validate_test_data_with_repair(raw_data)
 
     questions = []
     for q in validated.questions:
@@ -372,9 +408,9 @@ def create_test_document(test_data: dict, include_answers: bool = False) -> Byte
         BytesIO object containing the DOCX file
     """
     try:
-        # Validate the test data using Pydantic model
-        validated_data = TestData.model_validate(test_data)
-        
+        # Validate the test data using Pydantic model (with LLM typo repair)
+        validated_data = _validate_test_data_with_repair(test_data)
+
         doc = Document()
 
         # Set margins (2cm all sides)

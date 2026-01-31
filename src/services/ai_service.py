@@ -206,9 +206,9 @@ class AIService:
             # Map simplified model names to actual API versions if needed
             api_model = model_name
             if model_name == "claude-3.5-sonnet":
-                api_model = "claude-3-5-sonnet-20240620"
+                api_model = "claude-3-5-sonnet-latest"
             elif model_name == "claude-3-haiku":
-                api_model = "claude-3-haiku-20240307"
+                api_model = "claude-3-5-haiku-latest"
 
             messages = []
             
@@ -562,7 +562,7 @@ class AIService:
         prompt: str, 
         max_retries: int = 2,
         system_instruction: str = "You are an expert educational assistant.",
-        model: str = "gemini-2.5-flash"
+        model: str = "gpt-4o-mini"
     ):
         """
         Generate response with retry strategy as specified in Task 6
