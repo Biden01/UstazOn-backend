@@ -1640,24 +1640,35 @@ async def generate_rubric(
 
 @router.post("/generate-manim")
 async def generate_manim_code(
+    subject: str = Form(...),
     topic: str = Form(...),
     detail_level: str = Form("medium"),
     model: str = Form("gemini-2.5-flash"),
+    current_user: User = Depends(get_current_user),
 ):
     """
-    Generate Manim video for mathematical visualization
+    Generate Manim video for mathematical visualization.
+    Returns JSON with video_url.
     """
+    # Rate limit (same as test generation)
+    check_rate_limit(current_user.id, "test")
+    check_rate_limit(current_user.id, "global")
+
+    if detail_level not in ("low", "medium", "high"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="detail_level must be 'low', 'medium', or 'high'"
+        )
+
     try:
         from src.prompts.teacher_prompts import QUICK_PROMPTS
-        import json
-        import re
-        from fastapi.responses import FileResponse
         from src.services.manim_service import manim_service
 
         prompt_template = QUICK_PROMPTS["manim"]["prompt"]
-        
-        user_message = f"""Topic to visualize: {topic}
-Level of Detail: {detail_level}
+
+        user_message = f"""Предмет: {subject}
+Тема для визуализации: {topic}
+Уровень детализации: {detail_level}
 
 {prompt_template}"""
 
@@ -1670,7 +1681,7 @@ Level of Detail: {detail_level}
         )
 
         ai_response = result["text"].strip()
-        
+
         # Clean up response to get JSON
         ai_response = re.sub(r'```json\s*', '', ai_response)
         ai_response = re.sub(r'```\s*$', '', ai_response)
@@ -1681,34 +1692,40 @@ Level of Detail: {detail_level}
             data = json.loads(ai_response)
             code = data.get("code", "")
         except json.JSONDecodeError:
-             # Fallback: try to extract code block if JSON fails
+            # Fallback: try to extract code block if JSON fails
             code_match = re.search(r'```python(.*?)```', result["text"], re.DOTALL)
             if code_match:
                 code = code_match.group(1).strip()
             else:
                 raise ValueError("Failed to parse AI response code")
-        
+
         if not code:
             logger.error(f"Failed to extract code. Raw AI response: {result['text']}")
             raise ValueError("AI did not generate any code")
 
-        logger.info(f"Generated Manim Code: {code[:200]}...")  # Log start of code
+        # Validate that code contains a Scene class
+        if not re.search(r'class\s+\w+\s*\(.*Scene.*\):', code):
+            logger.error(f"Generated code has no Scene class: {code[:200]}")
+            raise ValueError("AI generated code does not contain a valid Scene class")
 
+        logger.info(f"Generated Manim Code for user {current_user.id}: {code[:200]}...")
 
-        # Generate Video
-        video_path = manim_service.generate_video(code)
-        
-        filename = f"manim_{topic.replace(' ', '_')[:20]}.mp4"
-        
-        return FileResponse(
-            path=video_path,
-            filename=filename,
-            media_type="video/mp4"
-        )
+        # Generate Video - returns public URL path like /uploads/videos/<id>.mp4
+        video_url = manim_service.generate_video(code)
+
+        log_generation_event({
+            "user_id": current_user.id,
+            "event": "manim_generated",
+            "subject": subject,
+            "topic": topic,
+            "detail_level": detail_level,
+            "model": model,
+        })
+
+        return {"video_url": video_url}
 
     except Exception as e:
         logger.error(f"Error generating Manim video: {e}")
-        # Return error as JSON even on failure so frontend handles it
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to generate video: {str(e)}"

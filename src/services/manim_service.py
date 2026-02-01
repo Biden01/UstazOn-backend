@@ -112,22 +112,25 @@ def sanitize_manim_code(code: str) -> str:
 
 class ManimService:
     def __init__(self):
-        self.output_dir = Path("media/manim_videos")
-        self.output_dir.mkdir(parents=True, exist_ok=True)
+        self.temp_dir = Path("media/manim_temp")
+        self.temp_dir.mkdir(parents=True, exist_ok=True)
+        self.videos_dir = Path("uploads/videos")
+        self.videos_dir.mkdir(parents=True, exist_ok=True)
 
     def generate_video(self, code: str) -> str:
         """
-        Executes Manim code and returns the path to the generated video file.
+        Executes Manim code, saves the video to uploads/videos/,
+        and returns the public relative URL.
         """
         job_id = str(uuid.uuid4())
-        job_dir = self.output_dir / job_id
+        job_dir = self.temp_dir / job_id
         job_dir.mkdir(exist_ok=True)
-        
+
         script_path = job_dir / "scene.py"
-        
+
         # Sanitize code to fix common AI errors
         code = sanitize_manim_code(code)
-        
+
         # Write code to file
         with open(script_path, "w", encoding="utf-8") as f:
             f.write(code)
@@ -142,13 +145,13 @@ class ManimService:
             # --media_dir: Output directory
             import sys
             cmd = [
-                sys.executable, "-m", "manim", 
-                "-qm", 
+                sys.executable, "-m", "manim",
+                "-qm",
                 "--media_dir", str(job_dir),
-                str(script_path), 
+                str(script_path),
                 scene_name
             ]
-            
+
             logger.info(f"Running Manim: {' '.join(cmd)}")
 
             # Using subprocess to run the command
@@ -156,39 +159,38 @@ class ManimService:
                 cmd,
                 capture_output=True,
                 text=True,
-                timeout=600  # 10 minutes max (increased from 5)
+                timeout=600  # 10 minutes max
             )
 
             if result.returncode != 0:
                 logger.error(f"Manim execution failed: {result.stderr}")
-                # Try to capture the last few lines of error
                 error_msg = result.stderr[-500:] if result.stderr else "Unknown Manim error"
                 raise Exception(f"Manim error: {error_msg}")
 
             # Find the output video file
-            # Manim structure: media_dir/videos/scene/quality/SceneName.mp4
-            # Search recursively for .mp4 as the structure might vary slightly
             mp4_files = list(job_dir.glob("**/*.mp4"))
-            
+
             if not mp4_files:
                 logger.error(f"Manim finished but no MP4 found. Stdout: {result.stdout}")
                 raise Exception("Video file was not generated despite success exit code")
 
             video_file = mp4_files[0]
 
-            # Move video to final location / clean up structure
-            final_path = self.output_dir / f"{job_id}.mp4"
+            # Move video to uploads/videos/ for static serving
+            final_filename = f"{job_id}.mp4"
+            final_path = self.videos_dir / final_filename
             shutil.move(str(video_file), str(final_path))
-            
-            # Cleanup output dir
+
+            # Cleanup temp dir
             shutil.rmtree(str(job_dir), ignore_errors=True)
 
-            return str(final_path)
+            # Return public URL path
+            return f"/uploads/videos/{final_filename}"
 
         except subprocess.TimeoutExpired:
             shutil.rmtree(str(job_dir), ignore_errors=True)
-            raise Exception("Video generation timed out (limit: 5 minutes)")
-            
+            raise Exception("Video generation timed out (limit: 10 minutes)")
+
         except Exception as e:
             # Cleanup on error
             shutil.rmtree(str(job_dir), ignore_errors=True)
