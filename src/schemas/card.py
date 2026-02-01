@@ -112,6 +112,8 @@ class CardListItem(BaseModel):
     created_at: datetime
     favorites_count: int
     img1_url: str | None
+    url: str | None = None
+    file_path: str | None = None
     topic: CardTopicSimple | None = None
     window_id: int | None = None
 
