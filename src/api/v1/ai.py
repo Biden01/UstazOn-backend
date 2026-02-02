@@ -17,7 +17,7 @@ from src.schemas.ai import (
     ConversationCreate, ConversationUpdate, ConversationResponse,
     ConversationListItem, SendMessageRequest, SendMessageResponse, MessageResponse
 )
-from src.schemas.ai_schemas import PresentationData, TestData, PresentationGenerateResponse, GammaPresentationResponse, PresentationStatusResponse
+from src.schemas.ai_schemas import PresentationData, TestData, PresentationGenerateResponse, GammaPresentationResponse, PresentationStatusResponse, PresentationDetailResponse
 from src.services.ai_service import ai_service
 from src.services.pdf_service import pdf_service
 from src.services.teaching_materials_service import teaching_materials_service
@@ -942,9 +942,50 @@ async def generate_presentation_legacy():
     )
 
 
+async def _generate_outline(subject: str, grade: str, topic: str, slides_count: int) -> dict | None:
+    """Generate presentation outline via AI and return parsed JSON, or None on failure."""
+    try:
+        from src.prompts.teacher_prompts import QUICK_PROMPTS
+
+        presentation_prompt = QUICK_PROMPTS["presentation"]["prompt"]
+        user_message = f"""Пән: {subject}
+Сынып: {grade}
+Тақырып: {topic}
+Слайдтар саны: {slides_count}
+
+{presentation_prompt}"""
+
+        result = await ai_service.chat(
+            message=user_message,
+            history=None,
+            system_instruction=(
+                "Сен — білім беру презентацияларын жасау бойынша сарапшысың. "
+                "Барлық мазмұнды ҚАЗАҚ ТІЛІНДЕ жаз. "
+                "ТЕК жарамды JSON қайтар, қосымша мәтінсіз."
+            ),
+            model="gemini-2.5-flash"
+        )
+
+        ai_response = result["text"].strip()
+        ai_response = re.sub(r'```json\s*', '', ai_response)
+        ai_response = re.sub(r'```\s*$', '', ai_response)
+        ai_response = ai_response.strip()
+
+        try:
+            return json.loads(ai_response)
+        except json.JSONDecodeError:
+            json_match = re.search(r'\{[\s\S]*\}', ai_response)
+            if json_match:
+                return json.loads(json_match.group())
+            return None
+    except Exception as e:
+        logger.error(f"Outline generation failed: {e}")
+        return None
+
+
 async def _gamma_background_task(material_id: int, subject: str, grade: str, topic: str, slides_count: int, user_id: int):
     """
-    Background task: POST to Gamma, then update the DB record with generationId + status.
+    Background task: generate outline + POST to Gamma, then update the DB record.
     Runs outside the request lifecycle via asyncio.create_task.
     """
     from src.db.session import async_session_maker
@@ -954,6 +995,9 @@ async def _gamma_background_task(material_id: int, subject: str, grade: str, top
 
     async with async_session_maker() as db:
         try:
+            # Generate outline for in-app viewer (runs in parallel with Gamma)
+            outline_data = await _generate_outline(subject, grade, topic, slides_count)
+
             generation_id = await gamma_service.generate_presentation(
                 subject=subject,
                 grade=grade,
@@ -966,6 +1010,9 @@ async def _gamma_background_task(material_id: int, subject: str, grade: str, top
                 content = dict(material.content or {})
                 content["gamma_generation_id"] = str(generation_id)
                 content["status"] = "generating"
+                if outline_data:
+                    content["slides"] = outline_data.get("slides", [])
+                    content["outline_title"] = outline_data.get("title", "")
                 material.content = content
                 flag_modified(material, "content")
                 await db.commit()
@@ -1207,6 +1254,45 @@ async def get_presentation_status(
             "status": "generating",
             "gamma_url": None,
         }
+
+
+@router.get("/presentations/{presentation_id}", response_model=PresentationDetailResponse)
+async def get_presentation_detail(
+    presentation_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    from sqlalchemy import select
+    from src.models.teaching_materials import TeachingMaterial, MaterialType
+
+    result = await db.execute(
+        select(TeachingMaterial).where(
+            TeachingMaterial.id == presentation_id,
+            TeachingMaterial.user_id == current_user.id,
+            TeachingMaterial.material_type == MaterialType.PRESENTATION,
+        )
+    )
+    material = result.scalar_one_or_none()
+
+    if not material:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Presentation not found"
+        )
+
+    content = material.content or {}
+
+    return {
+        "id": material.id,
+        "title": material.title,
+        "subject": material.subject,
+        "grade": material.grade,
+        "topic": material.topic,
+        "status": content.get("status", "pending"),
+        "gamma_url": content.get("gamma_url"),
+        "slides": content.get("slides"),
+        "created_at": material.created_at.isoformat() if material.created_at else None,
+    }
 
 
 @router.post("/generate-lesson-plan")

@@ -75,3 +75,22 @@ class PresentationStatusResponse(BaseModel):
 
     class Config:
         extra = "forbid"
+
+
+class PresentationDetailSlide(BaseModel):
+    slide_number: int
+    title: str
+    content: List[str] = []
+    image_query: Optional[str] = None
+    notes: Optional[str] = None
+
+class PresentationDetailResponse(BaseModel):
+    id: int
+    title: Optional[str] = None
+    subject: Optional[str] = None
+    grade: Optional[str] = None
+    topic: Optional[str] = None
+    status: str
+    gamma_url: Optional[str] = None
+    slides: Optional[List[PresentationDetailSlide]] = None
+    created_at: Optional[str] = None

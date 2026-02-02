@@ -83,11 +83,11 @@ async def generate_and_save_test(
 
     test_prompt = QUICK_PROMPTS["test"]["prompt"]
 
-    user_message = f"""Предмет: {subject}
-Класс: {grade}
-Тема: {topic}
-Количество вопросов: {question_count}
-Уровень сложности: {difficulty}
+    user_message = f"""Пән: {subject}
+Сынып: {grade}
+Тақырып: {topic}
+Сұрақтар саны: {question_count}
+Күрделілік деңгейі: {difficulty}
 
 {test_prompt}"""
 
@@ -95,11 +95,12 @@ async def generate_and_save_test(
         prompt=user_message,
         max_retries=2,
         system_instruction=(
-            "Ты - эксперт по созданию образовательных тестов. "
-            "Верни ТОЛЬКО валидный JSON без дополнительного текста.\n"
-            "Каждый option ОБЯЗАН содержать ТОЛЬКО ключи \"label\" и \"text\". "
-            "НИКОГДА не используй \"text_answer\" — используй \"text\".\n"
-            "Каждый вопрос должен содержать ровно 4 варианта ответа."
+            "Сен — білім беру тесттерін жасау бойынша сарапшысың. "
+            "Барлық мазмұнды ТІЛІ ҚАЗАҚША жаз. "
+            "ТІЛЬКИ жарамды JSON қайтар, қосымша мәтінсіз.\n"
+            "Әрбір option ТІЛЬКИ \"label\" және \"text\" кілттерін қамтуы КЕРЕК. "
+            "\"text_answer\" ЕШҚАШАН қолданба — \"text\" қолдан.\n"
+            "Әрбір сұрақта дәл 4 жауап нұсқасы болуы керек."
         ),
         model=model,
     )

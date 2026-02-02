@@ -62,11 +62,11 @@ class GammaService:
             raise ValueError("Gamma API key not configured")
 
         input_text = (
-            f"Create an educational presentation for {grade} students.\n"
-            f"Subject: {subject}\n"
-            f"Topic: {topic}\n\n"
-            f"Please create a comprehensive presentation covering this topic "
-            f"with clear explanations suitable for the grade level."
+            f"Қазақ тілінде {grade} оқушыларына арналған білім беру презентациясын жасаңыз.\n"
+            f"Пән: {subject}\n"
+            f"Тақырып: {topic}\n\n"
+            f"Осы тақырыпты толық қамтитын, сынып деңгейіне сай түсінікті "
+            f"түсініктемелері бар презентация жасаңыз. Барлық мәтін қазақ тілінде болуы керек."
         )
 
         payload = {
@@ -76,7 +76,7 @@ class GammaService:
             "numCards": slides_count,
             "textOptions": {
                 "amount": "medium",
-                "language": "ru",
+                "language": "kk",
             },
         }
 
