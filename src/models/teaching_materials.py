@@ -21,6 +21,7 @@ class MaterialType(str, enum.Enum):
     HOMEWORK = "homework"
     RUBRIC = "rubric"
     PRESENTATION = "presentation"
+    LESSON = "lesson"
 
 
 class DifficultyLevel(str, enum.Enum):
