@@ -1,8 +1,10 @@
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
 
 from src.admin import setup_admin
 from src.api.v1.router import api_router
@@ -11,6 +13,8 @@ from src.core.storage import UPLOAD_DIR
 from src.db.base import Base
 from src.db.session import engine
 from src.models import User, VerificationCode  # noqa: F401 - для создания таблиц
+
+templates = Jinja2Templates(directory="templates")
 
 
 @asynccontextmanager
@@ -41,6 +45,12 @@ app.include_router(api_router, prefix=settings.API_V1_PREFIX)
 
 # Админ-панель
 setup_admin(app)
+
+# Custom routes
+@app.get("/admin/manage-subscriptions", include_in_schema=False)
+async def subscription_management_page(request: Request):
+    """Render subscription management page"""
+    return templates.TemplateResponse("admin/user_subscription_list.html", {"request": request})
 
 # Статическая раздача файлов
 app.mount("/uploads", StaticFiles(directory=str(UPLOAD_DIR)), name="uploads")

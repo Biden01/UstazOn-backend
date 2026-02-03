@@ -1,0 +1,166 @@
+{% extends "sqladmin/base.html" %}
+
+{% block main %}
+<div class="container-fluid">
+    <div class="row">
+        <!-- Left: Users List -->
+        <div class="col-md-4">
+            <div class="card">
+                <div class="card-header">
+                    <h5>Пользователи</h5>
+                </div>
+                <div class="card-body">
+                    <div class="input-group mb-3">
+                        <input type="text" id="searchUsers" class="form-control" placeholder="Поиск по имени, телефону, ИИН" value="{{ search }}">
+                        <button class="btn btn-primary" onclick="loadUsers()">
+                            <i class="fas fa-search"></i>
+                        </button>
+                    </div>
+                    <div id="usersList" class="list-group">
+                        <div class="text-center">
+                            <div class="spinner-border" role="status">
+                                <span class="sr-only">Загрузка...</span>
+                            </div>
+                        </div>
+                    </div>
+                    <nav id="usersPagination" class="mt-3"></nav>
+                </div>
+            </div>
+        </div>
+
+        <!-- Right: User Subscriptions -->
+        <div class="col-md-8">
+            <div id="userDetailsPanel" style="display: none;">
+                <div class="card">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h5 id="selectedUserName">Подписки пользователя</h5>
+                        <button class="btn btn-success btn-sm" onclick="openAddSubscriptionModal()">
+                            <i class="fas fa-plus"></i> Добавить подписку
+                        </button>
+                    </div>
+                    <div class="card-body">
+                        <div id="subscriptionsTable">
+                            <div class="text-center">
+                                <div class="spinner-border" role="status">
+                                    <span class="sr-only">Загрузка...</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Add Bulk Subscription Form -->
+                <div class="card mt-3">
+                    <div class="card-header">
+                        <h5>Быстрое добавление нескольких подписок</h5>
+                    </div>
+                    <div class="card-body">
+                        <form id="bulkAddForm" onsubmit="addBulkSubscriptions(event)">
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <div class="mb-3">
+                                        <label class="form-label">Выберите предметы (Ctrl+click для выбора нескольких)</label>
+                                        <select id="bulkSubjects" class="form-select" multiple style="height: 200px;"></select>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="mb-3">
+                                        <label class="form-label">Тип учреждения</label>
+                                        <select id="bulkInstitutionType" class="form-select"></select>
+                                    </div>
+                                    <div class="mb-3">
+                                        <label class="form-label">Дата окончания (по умолчанию 30 дней)</label>
+                                        <input type="date" id="bulkEndDate" class="form-control">
+                                    </div>
+                                    <button type="submit" class="btn btn-primary w-100">
+                                        <i class="fas fa-plus"></i> Добавить выбранные предметы
+                                    </button>
+                                </div>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+
+            <div id="noUserSelected" class="text-center mt-5">
+                <i class="fas fa-user-circle fa-5x text-muted"></i>
+                <p class="mt-3">Выберите пользователя для управления подписками</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Add Single Subscription Modal -->
+<div class="modal fade" id="addSubscriptionModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Добавить подписку</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <form id="addSubscriptionForm">
+                    <div class="mb-3">
+                        <label class="form-label">Предмет</label>
+                        <select id="addSubject" class="form-select" required></select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Тип учреждения</label>
+                        <select id="addInstitutionType" class="form-select" required></select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Дата окончания</label>
+                        <input type="date" id="addEndDate" class="form-control" required>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Отмена</button>
+                <button type="button" class="btn btn-primary" onclick="addSubscription()">Добавить</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Edit Subscription Modal -->
+<div class="modal fade" id="editSubscriptionModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Редактировать подписку</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <form id="editSubscriptionForm">
+                    <input type="hidden" id="editSubscriptionId">
+                    <div class="mb-3">
+                        <label class="form-label">Предмет</label>
+                        <select id="editSubject" class="form-select" required></select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Тип учреждения</label>
+                        <select id="editInstitutionType" class="form-select" required></select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Дата окончания</label>
+                        <input type="date" id="editEndDate" class="form-control" required>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Отмена</button>
+                <button type="button" class="btn btn-primary" onclick="updateSubscription()">Сохранить</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% if message %}
+<div class="alert alert-success alert-dismissible fade show position-fixed top-0 start-50 translate-middle-x" role="alert">
+    {{ message }}
+    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+</div>
+{% endif %}
+
+<script src="/static/admin/js/user_subscriptions.js"></script>
+{% endblock main %}

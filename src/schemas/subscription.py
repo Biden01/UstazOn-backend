@@ -1,5 +1,5 @@
 from datetime import datetime, date
-from typing import Optional
+from typing import Optional, List
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -72,3 +72,9 @@ class PageAccessResponse(PageAccessBase):
     institution_type: Optional[InstitutionTypeResponse] = None
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class UserSubscriptionGrant(BaseModel):
+    subject_id: int
+    institution_type_ids: List[int] = Field(..., min_length=1)
+    days: int = Field(default=30, ge=1, le=365)

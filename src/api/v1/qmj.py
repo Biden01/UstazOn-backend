@@ -1,8 +1,13 @@
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
+import logging
+from datetime import datetime, timezone
+
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.deps import get_current_user, get_db
 from src.core.storage import save_document, get_file_extension
+from src.models.teaching_materials import TeachingMaterial, MaterialType
 from src.models.user import User
 from src.schemas.qmj import (
     QMJCreate,
@@ -16,6 +21,113 @@ from src.schemas.qmj import (
 from src.services import qmj_service
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
+
+
+@router.post("/generate", status_code=status.HTTP_201_CREATED)
+async def generate_qmj(
+    subject: str = Form(...),
+    grade: str = Form(...),
+    topic: str = Form(...),
+    language: str = Form("kk"),
+    model: str = Form("gemini-2.5-flash"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    AI-generate a structured QMJ (Қысқа мерзімді жоспар / Краткосрочный план).
+
+    Generates a full short-term lesson plan following the official Kazakhstan
+    education standard format and saves it to the database.
+
+    Returns the teaching material ID and the full JSON content.
+    """
+    from src.api.v1.ai import check_rate_limit, log_generation_event
+
+    try:
+        check_rate_limit(current_user.id, "test")
+        check_rate_limit(current_user.id, "global")
+
+        if language not in ("kk", "ru"):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="language must be 'kk' or 'ru'",
+            )
+
+        from src.services.qmj_ai_service import generate_qmj as _generate
+
+        result = await _generate(
+            db=db,
+            user_id=current_user.id,
+            subject=subject,
+            grade=grade,
+            topic=topic,
+            language=language,
+            model=model,
+        )
+
+        log_generation_event({
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "event": "qmj_generation",
+            "user_id": current_user.id,
+            "parameters": {
+                "subject": subject,
+                "grade": grade,
+                "topic": topic,
+                "language": language,
+            },
+            "ai_provider": model,
+            "material_id": result["id"],
+            "status": "success",
+        })
+
+        return result
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        log_generation_event({
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "event": "qmj_generation_error",
+            "user_id": current_user.id,
+            "error": str(e),
+            "status": "failed",
+        })
+        logger.error(f"Error generating QMJ: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to generate QMJ: {str(e)}",
+        )
+
+
+@router.get("/ai/{material_id}")
+async def get_ai_qmj(
+    material_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Retrieve an AI-generated QMJ by its TeachingMaterial ID.
+
+    Returns the full structured QMJ JSON content.
+    """
+    result = await db.execute(
+        select(TeachingMaterial).where(
+            TeachingMaterial.id == material_id,
+            TeachingMaterial.material_type == MaterialType.QMJ,
+        )
+    )
+    material = result.scalar_one_or_none()
+
+    if not material:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="AI-generated QMJ not found",
+        )
+
+    material.view_count += 1
+    await db.commit()
+
+    return {"id": material.id, "content": material.content}
 
 
 @router.get("/", response_model=list[QMJListItem])

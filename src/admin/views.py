@@ -1,7 +1,9 @@
 """
 Admin model views
 """
-from sqladmin import ModelView
+from datetime import date
+from sqladmin import ModelView, BaseView
+from sqlalchemy import func, select
 
 from src.models.user import User, VerificationCode
 from src.models.subject import Subject, InstitutionType, Template, Window
@@ -47,6 +49,7 @@ class UserAdmin(ModelView, model=User):
         User.is_superuser: "Суперпользователь",
         User.created_at: "Создан",
         User.updated_at: "Обновлён",
+        User.subscriptions: "Подписки",
     }
 
     form_columns = [
@@ -59,7 +62,11 @@ class UserAdmin(ModelView, model=User):
         User.is_superuser,
     ]
 
-    column_details_exclude_list = [User.hashed_password]
+    column_details_list = [
+        User.id, User.iin, User.name, User.phone,
+        User.is_active, User.is_verified, User.is_admin, User.is_superuser,
+        User.created_at, User.subscriptions,
+    ]
 
     page_size = 50
     page_size_options = [25, 50, 100, 200]
@@ -69,6 +76,12 @@ class UserAdmin(ModelView, model=User):
     can_delete = False
     can_view_details = True
     can_export = True
+
+    column_formatters = {
+        User.subscriptions: lambda m, a: len(m.subscriptions) if m.subscriptions else 0
+    }
+
+    detail_template = "user_detail.html"
 
 
 class VerificationCodeAdmin(ModelView, model=VerificationCode):
@@ -121,20 +134,58 @@ class SubscribeAdmin(ModelView, model=Subscribe):
     category = "Подписки"
 
     column_list = [
-        Subscribe.id, Subscribe.user_id, Subscribe.subject_id,
-        Subscribe.institution_type_id, Subscribe.end_date, Subscribe.created_at,
+        Subscribe.id,
+        "user.name",
+        "user.phone",
+        "subject.name",
+        "institution_type.name",
+        Subscribe.end_date,
+        Subscribe.created_at,
     ]
-    column_sortable_list = [Subscribe.id, Subscribe.end_date, Subscribe.created_at]
+    column_searchable_list = [
+        "user.name",
+        "user.phone",
+        "subject.name",
+        "institution_type.name"
+    ]
+    column_sortable_list = [
+        Subscribe.id,
+        "user.name",
+        "subject.name",
+        Subscribe.end_date,
+        Subscribe.created_at,
+    ]
     column_default_sort = [(Subscribe.id, True)]
 
     column_labels = {
         Subscribe.id: "ID",
-        Subscribe.user_id: "Пользователь",
-        Subscribe.subject_id: "Предмет",
-        Subscribe.institution_type_id: "Тип учреждения",
+        "user.name": "Пользователь",
+        "user.phone": "Телефон",
+        "subject.name": "Предмет",
+        "institution_type.name": "Тип учреждения",
         Subscribe.end_date: "Дата окончания",
         Subscribe.created_at: "Создана",
     }
+
+    column_formatters = {
+        Subscribe.end_date: lambda m, a: (
+            f"✅ {m.end_date}" if m.end_date >= date.today()
+            else f"❌ {m.end_date}"
+        )
+    }
+
+    column_details_list = [
+        Subscribe.id,
+        "user.name",
+        "user.phone",
+        "user.iin",
+        "subject.name",
+        "subject.code",
+        "institution_type.name",
+        Subscribe.end_date,
+        Subscribe.created_at,
+        Subscribe.updated_at,
+    ]
 
     form_columns = [
         Subscribe.user_id,
@@ -142,6 +193,8 @@ class SubscribeAdmin(ModelView, model=Subscribe):
         Subscribe.institution_type_id,
         Subscribe.end_date,
     ]
+
+    detail_template = "admin/subscribe_detail.html"
 
     can_create = True
     can_edit = True

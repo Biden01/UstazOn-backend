@@ -1,0 +1,123 @@
+{% extends "sqladmin/base.html" %}
+
+{% block main %}
+<div class="container-fluid">
+    <div class="row">
+        <div class="col-12">
+            <h2>Подписка #{{ model.id }}</h2>
+
+            <!-- User Info Card -->
+            <div class="card mb-3">
+                <div class="card-header">
+                    <h5 class="mb-0"><i class="fas fa-user"></i> Пользователь</h5>
+                </div>
+                <div class="card-body">
+                    <table class="table table-striped">
+                        <tr>
+                            <th style="width: 200px;">Имя:</th>
+                            <td>{{ model.user.name if model.user else '-' }}</td>
+                        </tr>
+                        <tr>
+                            <th>Телефон:</th>
+                            <td>{{ model.user.phone if model.user else '-' }}</td>
+                        </tr>
+                        <tr>
+                            <th>ИИН:</th>
+                            <td>{{ model.user.iin if model.user else '-' }}</td>
+                        </tr>
+                        <tr>
+                            <th>ID пользователя:</th>
+                            <td>{{ model.user_id }}</td>
+                        </tr>
+                    </table>
+
+                    <div class="mt-3">
+                        <a href="/admin/user/detail/{{ model.user_id }}" class="btn btn-info">
+                            <i class="fas fa-user"></i> Перейти к профилю пользователя
+                        </a>
+                        <a href="/admin/manage-subscriptions?user_id={{ model.user_id }}" class="btn btn-success">
+                            <i class="fas fa-users-gear"></i> Управление подписками пользователя
+                        </a>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Subscription Details -->
+            <div class="card mb-3">
+                <div class="card-header">
+                    <h5 class="mb-0"><i class="fas fa-credit-card"></i> Детали подписки</h5>
+                </div>
+                <div class="card-body">
+                    <table class="table table-striped">
+                        <tr>
+                            <th style="width: 200px;">Предмет:</th>
+                            <td>
+                                {{ model.subject.name if model.subject else '-' }}
+                                {% if model.subject %}
+                                <small class="text-muted">({{ model.subject.code }})</small>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        <tr>
+                            <th>ID предмета:</th>
+                            <td>{{ model.subject_id }}</td>
+                        </tr>
+                        <tr>
+                            <th>Тип учреждения:</th>
+                            <td>{{ model.institution_type.name if model.institution_type else '-' }}</td>
+                        </tr>
+                        <tr>
+                            <th>ID типа учреждения:</th>
+                            <td>{{ model.institution_type_id }}</td>
+                        </tr>
+                        <tr>
+                            <th>Дата окончания:</th>
+                            <td>
+                                {{ model.end_date }}
+                            </td>
+                        </tr>
+                        <tr>
+                            <th>Статус:</th>
+                            <td>
+                                {% set today = now() %}
+                                {% if model.end_date >= today %}
+                                    <span class="badge bg-success fs-6">
+                                        <i class="fas fa-check-circle"></i> Активна
+                                    </span>
+                                {% else %}
+                                    <span class="badge bg-danger fs-6">
+                                        <i class="fas fa-times-circle"></i> Истекла
+                                    </span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        <tr>
+                            <th>Создана:</th>
+                            <td>{{ model.created_at }}</td>
+                        </tr>
+                        <tr>
+                            <th>Обновлена:</th>
+                            <td>{{ model.updated_at }}</td>
+                        </tr>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Actions -->
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="mb-0"><i class="fas fa-tools"></i> Действия</h5>
+                </div>
+                <div class="card-body">
+                    <a href="/admin/subscribe/edit/{{ model.id }}" class="btn btn-primary">
+                        <i class="fas fa-edit"></i> Редактировать подписку
+                    </a>
+                    <button onclick="if(confirm('Вы уверены, что хотите удалить эту подписку?')) window.location.href='/admin/subscribe/delete/{{ model.id }}'" class="btn btn-danger">
+                        <i class="fas fa-trash"></i> Удалить подписку
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
