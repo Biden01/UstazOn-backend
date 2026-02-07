@@ -33,6 +33,8 @@ class SubjectBase(BaseModel):
     code: str = Field(..., min_length=1, max_length=50)
     image_url: Optional[str] = Field(None, max_length=500)
     hero_image_url: Optional[str] = Field(None, max_length=500)
+    image_file: Optional[str] = Field(None, max_length=100)
+    hero_image_file: Optional[str] = Field(None, max_length=100)
 
 
 class SubjectCreate(SubjectBase):
@@ -45,6 +47,8 @@ class SubjectUpdate(BaseModel):
     code: Optional[str] = Field(None, min_length=1, max_length=50)
     image_url: Optional[str] = Field(None, max_length=500)
     hero_image_url: Optional[str] = Field(None, max_length=500)
+    image_file: Optional[str] = Field(None, max_length=100)
+    hero_image_file: Optional[str] = Field(None, max_length=100)
     institution_type_ids: Optional[list[int]] = None
     window_ids: Optional[list[int]] = None
 
@@ -88,6 +92,7 @@ class WindowBase(BaseModel):
     link: Optional[str] = Field(None, max_length=255)
     nsub: bool = False  # requires subscription
     image_url: Optional[str] = Field(None, max_length=500)
+    image_file: Optional[str] = Field(None, max_length=100)
 
 
 class WindowCreate(WindowBase):
@@ -100,6 +105,7 @@ class WindowUpdate(BaseModel):
     link: Optional[str] = Field(None, max_length=255)
     nsub: Optional[bool] = None
     image_url: Optional[str] = Field(None, max_length=500)
+    image_file: Optional[str] = Field(None, max_length=100)
     subject_ids: Optional[list[int]] = None
 
 

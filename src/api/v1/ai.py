@@ -202,6 +202,41 @@ def _validate_test_data(data: dict) -> None:
         raise ValueError(f"Invalid test data: {str(e)}")
 
 
+@router.post("/chat/multi")
+async def chat_multi(request: ChatRequest):
+    """
+    Send message to 3 AI models (GPT-4o-mini, Claude, Gemini) in parallel.
+    User can then choose which response they prefer.
+
+    Returns list of responses from each model.
+    """
+    try:
+        history = None
+        if request.history:
+            history = [
+                {"role": msg.role, "content": msg.content} for msg in request.history
+            ]
+
+        system_instruction = request.system_instruction
+        if not system_instruction:
+            system_instruction = get_system_prompt()
+
+        results = await ai_service.chat_multi(
+            message=request.message,
+            history=history,
+            system_instruction=system_instruction,
+        )
+
+        return {"responses": results}
+
+    except Exception as e:
+        logger.error(f"Error in chat_multi endpoint: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An error occurred while processing your request.",
+        )
+
+
 @router.post("/chat", response_model=ChatResponse)
 async def chat(request: ChatRequest):
     """

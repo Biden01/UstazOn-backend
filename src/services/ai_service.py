@@ -557,6 +557,59 @@ class AIService:
 
         return available
 
+    async def chat_multi(
+        self,
+        message: str,
+        history: list[dict[str, str]] | None = None,
+        system_instruction: str | None = None,
+        images: list[bytes] | None = None,
+    ) -> list[dict[str, Any]]:
+        """
+        Send message to 3 AI models in parallel and return all responses.
+
+        Returns:
+            List of responses from each model with structure:
+            [{"model": "model_name", "provider": "Provider", "text": "response", "usage": {...}, "error": None}, ...]
+        """
+        # Select one model from each provider
+        models_to_use = [
+            ("gpt-4o-mini", "OpenAI"),
+            ("claude-3-haiku", "Anthropic"),
+            ("gemini-2.5-flash", "Google"),
+        ]
+
+        async def get_response(model_name: str, provider: str) -> dict:
+            try:
+                result = await self.chat(
+                    message=message,
+                    history=history,
+                    system_instruction=system_instruction,
+                    images=images,
+                    model=model_name
+                )
+                return {
+                    "model": model_name,
+                    "provider": provider,
+                    "text": result["text"],
+                    "usage": result["usage"],
+                    "error": None
+                }
+            except Exception as e:
+                logger.error(f"Error in {model_name}: {e}")
+                return {
+                    "model": model_name,
+                    "provider": provider,
+                    "text": None,
+                    "usage": None,
+                    "error": str(e)
+                }
+
+        # Run all models in parallel
+        tasks = [get_response(model, provider) for model, provider in models_to_use]
+        results = await asyncio.gather(*tasks)
+
+        return list(results)
+
     async def generate_with_retry(
         self, 
         prompt: str, 

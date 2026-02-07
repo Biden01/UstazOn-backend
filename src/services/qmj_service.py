@@ -17,7 +17,11 @@ async def get_qmj_list(
     code: str | None = None,
     author_id: int | None = None,
 ) -> list[QMJ]:
-    """Get QMJ list with optional filters"""
+    """Get QMJ list with optional filters.
+
+    The 'code' parameter filters by subject code through the qmj_subjects relationship,
+    not by the QMJ.code field directly.
+    """
     query = select(QMJ).options(
         selectinload(QMJ.subjects),
         selectinload(QMJ.institution_types),
@@ -30,19 +34,21 @@ async def get_qmj_list(
         filters.append(QMJ.grade == grade)
     if quarter is not None:
         filters.append(QMJ.quarter == quarter)
-    if code is not None:
-        filters.append(QMJ.code == code)
     if author_id is not None:
         filters.append(QMJ.author_id == author_id)
 
     if filters:
         query = query.where(and_(*filters))
 
+    # Filter by subject code through relationship
+    if code is not None:
+        query = query.join(QMJ.subjects).where(Subject.code == code)
+
     # Order by quarter and order number
     query = query.order_by(QMJ.quarter, QMJ.order, QMJ.id).offset(skip).limit(limit)
 
     result = await db.execute(query)
-    return list(result.scalars().all())
+    return list(result.unique().scalars().all())
 
 
 async def get_qmj_by_id(db: AsyncSession, qmj_id: int) -> QMJ | None:
@@ -167,13 +173,18 @@ async def delete_qmj_file(db: AsyncSession, file_id: int) -> bool:
 async def get_qmj_by_quarter(
     db: AsyncSession, quarter: int, grade: int | None = None, code: str | None = None
 ) -> list[QMJ]:
-    """Get all QMJ for a specific quarter, optionally filtered by grade and subject code"""
+    """Get all QMJ for a specific quarter, optionally filtered by grade and subject code.
+
+    The 'code' parameter filters by subject code through the qmj_subjects relationship.
+    """
     query = select(QMJ).where(QMJ.quarter == quarter)
 
     if grade is not None:
         query = query.where(QMJ.grade == grade)
+
+    # Filter by subject code through relationship
     if code is not None:
-        query = query.where(QMJ.code == code)
+        query = query.join(QMJ.subjects).where(Subject.code == code)
 
     query = query.order_by(QMJ.order, QMJ.id).options(
         selectinload(QMJ.subjects),
@@ -182,4 +193,4 @@ async def get_qmj_by_quarter(
     )
 
     result = await db.execute(query)
-    return list(result.scalars().all())
+    return list(result.unique().scalars().all())

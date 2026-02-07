@@ -151,7 +151,7 @@ async def get_card_by_id(db: AsyncSession, card_id: int) -> Card | None:
         .options(
             selectinload(Card.topic),
             selectinload(Card.subjects).selectinload(Subject.institution_types),
-            selectinload(Card.subjects).selectinload(Subject.windows),
+            selectinload(Card.subjects).selectinload(Subject.windows).selectinload(Window.template),
             selectinload(Card.institution_types),
             selectinload(Card.window),
             selectinload(Card.author),

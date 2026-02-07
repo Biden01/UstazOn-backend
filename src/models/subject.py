@@ -64,6 +64,8 @@ class Subject(Base):
     # Images
     image_url = Column(String(500), nullable=True)
     hero_image_url = Column(String(500), nullable=True)
+    image_file = Column(String(100), nullable=True)
+    hero_image_file = Column(String(100), nullable=True)
 
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -111,6 +113,7 @@ class Window(Base):
     link = Column(String(255), nullable=True)
     nsub = Column(Boolean, default=False)  # requires subscription
     image_url = Column(String(500), nullable=True)
+    image_file = Column(String(100), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
     # Relationships

@@ -3,17 +3,23 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from src.models import Subject, InstitutionType, Template, Window
+from src.models.subject import subject_window
 from src.schemas.subject import SubjectCreate, SubjectUpdate
 
 
 async def get_subjects(db: AsyncSession, skip: int = 0, limit: int = 100) -> list[Subject]:
-    """Get list of subjects with institution types"""
+    """Get list of subjects that have at least one window"""
+    # Only return subjects that have at least one window (like old project)
+    subquery = select(subject_window.c.subject_id).distinct()
+
     result = await db.execute(
         select(Subject)
+        .where(Subject.id.in_(subquery))
         .options(
             selectinload(Subject.institution_types),
             selectinload(Subject.windows).selectinload(Window.template),
         )
+        .order_by(Subject.id)
         .offset(skip)
         .limit(limit)
     )
