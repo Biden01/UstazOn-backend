@@ -25,10 +25,18 @@ ALLOWED_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".gif", ".webp"}
 ALLOWED_VIDEO_EXTENSIONS = {".mp4", ".webm", ".mov", ".avi"}
 ALLOWED_DOCUMENT_EXTENSIONS = {".pdf", ".doc", ".docx", ".ppt", ".pptx", ".xls", ".xlsx"}
 
+FILES_DIR = UPLOAD_DIR / "files"
+FILES_DIR.mkdir(exist_ok=True)
+
+# Thumbnail directory (legacy-compatible path)
+THUMBNAILS_DIR = Path("media/cards/image")
+THUMBNAILS_DIR.mkdir(parents=True, exist_ok=True)
+
 # Max file sizes (in bytes)
 MAX_IMAGE_SIZE = 10 * 1024 * 1024  # 10 MB
 MAX_VIDEO_SIZE = 100 * 1024 * 1024  # 100 MB
 MAX_DOCUMENT_SIZE = 20 * 1024 * 1024  # 20 MB
+MAX_FILE_SIZE = 50 * 1024 * 1024  # 50 MB
 
 
 def get_file_extension(filename: str) -> str:
@@ -138,6 +146,28 @@ async def save_document(upload_file: UploadFile) -> str:
     # Generate unique filename
     filename = generate_unique_filename(upload_file.filename or "document.pdf")
     destination = DOCUMENTS_DIR / filename
+
+    # Save file
+    return await save_upload_file(upload_file, destination)
+
+
+async def save_file(upload_file: UploadFile) -> str:
+    """
+    Save any uploaded file (no extension restrictions)
+    Returns: relative path to saved file
+    Raises: ValueError if file is too large
+    """
+    # Validate size
+    content = await upload_file.read()
+    if len(content) > MAX_FILE_SIZE:
+        raise ValueError(f"File too large. Max size: {MAX_FILE_SIZE / 1024 / 1024}MB")
+
+    # Reset file pointer
+    await upload_file.seek(0)
+
+    # Generate unique filename
+    filename = generate_unique_filename(upload_file.filename or "file")
+    destination = FILES_DIR / filename
 
     # Save file
     return await save_upload_file(upload_file, destination)

@@ -1,3 +1,5 @@
+import logging
+
 from sqlalchemy import select, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -5,6 +7,9 @@ from sqlalchemy.orm import selectinload
 from src.models.card import Card, CardTopic
 from src.models.subject import Subject, InstitutionType, Window
 from src.schemas.card import CardCreate, CardUpdate, CardTopicCreate, CardTopicUpdate
+from src.services.thumbnail_service import generate_thumbnails
+
+logger = logging.getLogger(__name__)
 
 
 # CardTopic CRUD
@@ -101,6 +106,7 @@ async def get_cards(
     topic_id: int | None = None,
     window_id: int | None = None,
     author_id: int | None = None,
+    search: str | None = None,
 ) -> list[Card]:
     """Get cards with optional filters"""
     query = select(Card).options(
@@ -125,6 +131,8 @@ async def get_cards(
         filters.append(Card.window_id == window_id)
     if author_id is not None:
         filters.append(Card.author_id == author_id)
+    if search:
+        filters.append(Card.name.ilike(f"%{search}%"))
 
     if filters:
         query = query.where(and_(*filters))
@@ -186,6 +194,21 @@ async def create_card(db: AsyncSession, card_data: CardCreate, author_id: int) -
     db.add(card)
     await db.commit()
     await db.refresh(card)
+
+    # Generate thumbnails from uploaded document
+    # Check both file_path and url fields — frontend may put the file in either
+    doc_path = card.file_path or card.url
+    if doc_path:
+        try:
+            thumbs = await generate_thumbnails(doc_path, card.id)
+            if thumbs:
+                for i, thumb in enumerate(thumbs[:5], 1):
+                    setattr(card, f"img{i}_url", thumb)
+                await db.commit()
+                await db.refresh(card)
+        except Exception:
+            logger.exception("Thumbnail generation failed for card %d", card.id)
+
     # Return card with all relationships loaded
     return await get_card_by_id(db, card.id)
 
@@ -265,20 +288,24 @@ async def toggle_favorite(db: AsyncSession, card_id: int, user_id: int) -> Card 
 async def get_user_favorites(
     db: AsyncSession, user_id: int, skip: int = 0, limit: int = 100
 ) -> list[Card]:
-    """Get user's favorite cards"""
-    from src.models.user import User
+    """Get user's favorite cards with all relationships loaded"""
+    from src.models.card import card_favorites
 
+    # Query cards directly through the join table, with all needed relationships
     result = await db.execute(
-        select(User)
-        .where(User.id == user_id)
-        .options(selectinload(User.favorite_cards))
+        select(Card)
+        .join(card_favorites, Card.id == card_favorites.c.card_id)
+        .where(card_favorites.c.user_id == user_id)
+        .options(
+            selectinload(Card.topic),
+            selectinload(Card.favorites),
+            selectinload(Card.author),
+        )
+        .order_by(Card.id.desc())
+        .offset(skip)
+        .limit(limit)
     )
-    user = result.scalar_one_or_none()
-    if not user:
-        return []
-
-    # Return paginated favorites
-    return user.favorite_cards[skip : skip + limit]
+    return list(result.unique().scalars().all())
 
 
 # Autocomplete / Suggestions

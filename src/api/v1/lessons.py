@@ -118,9 +118,10 @@ async def generate_lesson(
 async def get_lesson(
     lesson_id: int,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """
-    Retrieve a lesson document by ID.
+    Retrieve a lesson document by ID (requires auth).
 
     Returns the full lesson JSON structure with meta, layout, and blocks.
     """
@@ -137,6 +138,14 @@ async def get_lesson(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Lesson not found",
         )
+
+    # Author always has access
+    if material.user_id != current_user.id:
+        if not (current_user.is_admin or current_user.is_superuser):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="subscription_required",
+            )
 
     # Increment view count
     material.view_count += 1

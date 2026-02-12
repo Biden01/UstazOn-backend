@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from pydantic import BaseModel
 
 from src.api.deps import get_current_user
-from src.core.storage import save_image, save_video, save_document
+from src.core.storage import save_image, save_video, save_document, save_file
 from src.models.user import User
 
 router = APIRouter()
@@ -60,6 +60,23 @@ async def upload_document(
         file_path = await save_document(file)
         return UploadResponse(
             file_path=file_path, message="Document uploaded successfully"
+        )
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)
+        )
+
+
+@router.post("/files", response_model=UploadResponse)
+async def upload_file(
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user),
+):
+    """Upload any file type. Max size: 50MB"""
+    try:
+        file_path = await save_file(file)
+        return UploadResponse(
+            file_path=file_path, message="File uploaded successfully"
         )
     except ValueError as e:
         raise HTTPException(

@@ -221,3 +221,20 @@ async def get_my_subscriptions(
         db, current_user.id, active_only=active_only, skip=skip, limit=limit
     )
     return subscriptions
+
+
+@router.get("/me/check")
+async def check_my_subscription(
+    subject_id: int = Query(..., description="Subject ID to check subscription for"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Check if current user has an active subscription for a subject"""
+    # Admins/superusers always have access
+    if current_user.is_admin or current_user.is_superuser:
+        return {"has_subscription": True}
+
+    has_sub = await subscription_service.check_user_has_active_subscription(
+        db, current_user.id, subject_id
+    )
+    return {"has_subscription": has_sub}

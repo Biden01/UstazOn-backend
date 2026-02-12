@@ -10,3 +10,8 @@ node_modules/
 uploads_backup.tar.gz
 
 .env
+__pycache__/
+*.pyc
+backups/
+*.sql
+backup-db.sh

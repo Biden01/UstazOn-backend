@@ -34,9 +34,51 @@ from src.db.session import get_db
 from src.api.deps import get_current_user
 from src.models.user import User
 from src.core.config import settings
+from src.services import subscription_service
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+
+FREE_AI_DAILY_LIMIT = 5
+
+
+async def check_ai_free_limit(user_id: int, db: AsyncSession) -> dict:
+    """
+    Check if user is a subscriber or free user.
+    Free users: 5 AI messages per day.
+    Returns dict with is_subscriber, remaining, limit info.
+    Raises 403 if free limit exceeded.
+    """
+    from src.services.user_service import get_user_by_id
+    user = await get_user_by_id(db, user_id)
+
+    if user and (user.is_admin or user.is_superuser):
+        return {"is_subscriber": True, "remaining": -1}
+
+    has_sub = await subscription_service.check_user_has_any_active_subscription(db, user_id)
+    if has_sub:
+        return {"is_subscriber": True, "remaining": -1}
+
+    # Free user — check daily limit
+    key = f"rate_limit:ai_chat:free:{user_id}"
+    is_allowed, retry_after = rate_limiter.is_allowed(
+        key, max_requests=FREE_AI_DAILY_LIMIT, window_seconds=86400, user_id=user_id
+    )
+    if not is_allowed:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "code": "ai_free_limit_exceeded",
+                "message": f"Тегін лимит аяқталды ({FREE_AI_DAILY_LIMIT} хабарлама/күн). Жазылым алыңыз.",
+                "limit": FREE_AI_DAILY_LIMIT,
+                "retry_after": retry_after,
+            }
+        )
+
+    # Calculate remaining
+    remaining = rate_limiter.get_remaining(key, max_requests=FREE_AI_DAILY_LIMIT, window_seconds=86400)
+    return {"is_subscriber": False, "remaining": remaining}
 
 
 def check_rate_limit(user_id: int, resource_type: str) -> None:
@@ -203,7 +245,11 @@ def _validate_test_data(data: dict) -> None:
 
 
 @router.post("/chat/multi")
-async def chat_multi(request: ChatRequest):
+async def chat_multi(
+    request: ChatRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """
     Send message to 3 AI models (GPT-4o-mini, Claude, Gemini) in parallel.
     User can then choose which response they prefer.
@@ -211,6 +257,7 @@ async def chat_multi(request: ChatRequest):
     Returns list of responses from each model.
     """
     try:
+        await check_ai_free_limit(current_user.id, db)
         history = None
         if request.history:
             history = [
@@ -238,7 +285,11 @@ async def chat_multi(request: ChatRequest):
 
 
 @router.post("/chat", response_model=ChatResponse)
-async def chat(request: ChatRequest):
+async def chat(
+    request: ChatRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """
     Send a message to AI chatbot and get a response
 
@@ -247,6 +298,7 @@ async def chat(request: ChatRequest):
     - **system_instruction**: Optional instruction to guide AI behavior
     """
     try:
+        await check_ai_free_limit(current_user.id, db)
         # Convert history format if provided
         history = None
         if request.history:
@@ -286,7 +338,11 @@ async def chat(request: ChatRequest):
 
 
 @router.post("/chat/stream")
-async def chat_stream(request: ChatRequest):
+async def chat_stream(
+    request: ChatRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """
     Stream AI chat response in real-time
 
@@ -297,6 +353,7 @@ async def chat_stream(request: ChatRequest):
     Returns a streaming response with chunks of text
     """
     try:
+        await check_ai_free_limit(current_user.id, db)
         # Convert history format if provided
         history = None
         if request.history:
@@ -335,6 +392,24 @@ async def chat_stream(request: ChatRequest):
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="An error occurred while processing your request.",
         )
+
+
+@router.get("/usage")
+async def get_ai_usage(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Get current user's AI usage info (free limit remaining, subscriber status)"""
+    if current_user.is_admin or current_user.is_superuser:
+        return {"is_subscriber": True, "remaining": -1, "limit": FREE_AI_DAILY_LIMIT}
+
+    has_sub = await subscription_service.check_user_has_any_active_subscription(db, current_user.id)
+    if has_sub:
+        return {"is_subscriber": True, "remaining": -1, "limit": FREE_AI_DAILY_LIMIT}
+
+    key = f"rate_limit:ai_chat:free:{current_user.id}"
+    remaining = rate_limiter.get_remaining(key, max_requests=FREE_AI_DAILY_LIMIT, window_seconds=86400)
+    return {"is_subscriber": False, "remaining": remaining, "limit": FREE_AI_DAILY_LIMIT}
 
 
 @router.get("/prompts", response_model=dict)
@@ -381,7 +456,10 @@ async def get_prompt(prompt_key: str):
 
 
 @router.get("/system-prompt")
-async def get_teacher_system_prompt(subject: str | None = None):
+async def get_teacher_system_prompt(
+    subject: str | None = None,
+    current_user: User = Depends(get_current_user),
+):
     """
     Получить системный промпт для учителя
 

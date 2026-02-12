@@ -9,6 +9,7 @@ from src.api.deps import get_current_user, get_db
 from src.core.storage import save_document, get_file_extension
 from src.models.teaching_materials import TeachingMaterial, MaterialType
 from src.models.user import User
+from src.services import subscription_service
 from src.schemas.qmj import (
     QMJCreate,
     QMJUpdate,
@@ -104,6 +105,7 @@ async def generate_qmj(
 async def get_ai_qmj(
     material_id: int,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """
     Retrieve an AI-generated QMJ by its TeachingMaterial ID.
@@ -123,6 +125,14 @@ async def get_ai_qmj(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="AI-generated QMJ not found",
         )
+
+    # Author always has access
+    if material.user_id != current_user.id:
+        if not (current_user.is_admin or current_user.is_superuser):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="subscription_required",
+            )
 
     material.view_count += 1
     await db.commit()
@@ -192,14 +202,35 @@ async def create_qmj(
 async def get_qmj(
     qmj_id: int,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
-    """Get QMJ by ID with all details"""
+    """Get QMJ by ID with all details (requires subscription)"""
     qmj = await qmj_service.get_qmj_by_id(db, qmj_id)
     if not qmj:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="QMJ not found"
         )
-    return qmj
+
+    # Admins/superusers — always have access
+    if current_user.is_admin or current_user.is_superuser:
+        return qmj
+
+    # Author — always has access
+    if qmj.author_id == current_user.id:
+        return qmj
+
+    # Check subscription for any subject of the QMJ
+    for subject in qmj.subjects:
+        has_sub = await subscription_service.check_user_has_active_subscription(
+            db, current_user.id, subject.id
+        )
+        if has_sub:
+            return qmj
+
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="subscription_required",
+    )
 
 
 @router.put("/{qmj_id}", response_model=QMJDetailResponse)

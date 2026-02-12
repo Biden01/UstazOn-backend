@@ -94,5 +94,21 @@ class RateLimiter:
                 return True, 0
 
 
+    def get_remaining(self, key: str, max_requests: int, window_seconds: int) -> int:
+        """Get remaining requests in the current window (without consuming)"""
+        current_time = int(time.time())
+        window_start = current_time - window_seconds
+
+        if self.redis_client:
+            self.redis_client.zremrangebyscore(key, 0, window_start)
+            current_count = self.redis_client.zcard(key)
+            return max(0, max_requests - current_count)
+        else:
+            if key not in self._memory_store:
+                return max_requests
+            active = [t for t in self._memory_store[key] if t > window_start]
+            return max(0, max_requests - len(active))
+
+
 # Global rate limiter instance
 rate_limiter = RateLimiter()

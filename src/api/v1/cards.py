@@ -13,7 +13,7 @@ from src.schemas.card import (
     CardTopicUpdate,
     CardTopicResponse,
 )
-from src.services import card_service
+from src.services import card_service, subscription_service
 
 router = APIRouter()
 
@@ -102,6 +102,7 @@ async def get_cards(
     topic_id: int | None = None,
     window_id: int | None = None,
     author_id: int | None = None,
+    search: str | None = Query(None, description="Search by card name"),
     db: AsyncSession = Depends(get_db),
 ):
     """Get cards with optional filters"""
@@ -116,6 +117,7 @@ async def get_cards(
         topic_id=topic_id,
         window_id=window_id,
         author_id=author_id,
+        search=search,
     )
 
 
@@ -133,14 +135,35 @@ async def create_card(
 async def get_card(
     card_id: int,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
-    """Get card by ID with full details"""
+    """Get card by ID with full details (requires subscription)"""
     card = await card_service.get_card_by_id(db, card_id)
     if not card:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Card not found"
         )
-    return card
+
+    # Admins/superusers — always have access
+    if current_user.is_admin or current_user.is_superuser:
+        return card
+
+    # Author of the card — always has access
+    if card.author_id == current_user.id:
+        return card
+
+    # Check subscription for any subject of the card
+    for subject in card.subjects:
+        has_sub = await subscription_service.check_user_has_active_subscription(
+            db, current_user.id, subject.id
+        )
+        if has_sub:
+            return card
+
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="subscription_required",
+    )
 
 
 @router.put("/{card_id}", response_model=CardDetailResponse)
@@ -150,14 +173,13 @@ async def update_card(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Update card (only by author)"""
-    # Check if card exists and user is the author
+    """Update card (author or admin)"""
     existing_card = await card_service.get_card_by_id(db, card_id)
     if not existing_card:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Card not found"
         )
-    if existing_card.author_id != current_user.id:
+    if existing_card.author_id != current_user.id and not current_user.is_superuser:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You can only update your own cards",
@@ -173,14 +195,13 @@ async def delete_card(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Delete card (only by author)"""
-    # Check if card exists and user is the author
+    """Delete card (author or admin)"""
     existing_card = await card_service.get_card_by_id(db, card_id)
     if not existing_card:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Card not found"
         )
-    if existing_card.author_id != current_user.id:
+    if existing_card.author_id != current_user.id and not current_user.is_superuser:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You can only delete your own cards",

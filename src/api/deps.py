@@ -1,4 +1,6 @@
 """FastAPI dependencies"""
+from typing import Optional
+
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -9,6 +11,7 @@ from src.models.user import User
 from src.services import user_service
 
 security = HTTPBearer()
+optional_security = HTTPBearer(auto_error=False)
 
 
 async def get_current_user(
@@ -42,6 +45,28 @@ async def get_current_user(
     return user
 
 
+async def get_optional_user(
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(optional_security),
+    db: AsyncSession = Depends(get_db),
+) -> User | None:
+    """Get current user if authenticated, None otherwise (no 401)"""
+    if not credentials:
+        return None
+
+    token = credentials.credentials
+    payload = decode_token(token)
+
+    if not payload or payload.get("type") != "access":
+        return None
+
+    user_id = payload.get("sub")
+    if not user_id:
+        return None
+
+    user = await user_service.get_user_by_id(db, int(user_id))
+    return user
+
+
 async def get_current_superuser(
     current_user: User = Depends(get_current_user),
 ) -> User:
@@ -54,4 +79,4 @@ async def get_current_superuser(
     return current_user
 
 
-__all__ = ["get_current_user", "get_current_superuser", "get_db"]
+__all__ = ["get_current_user", "get_optional_user", "get_current_superuser", "get_db"]

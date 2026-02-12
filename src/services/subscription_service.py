@@ -163,6 +163,22 @@ async def check_user_has_active_subscription(
     return result.scalar_one_or_none() is not None
 
 
+async def check_user_has_any_active_subscription(
+    db: AsyncSession,
+    user_id: int,
+) -> bool:
+    """Check if user has at least one active subscription (any subject)"""
+    result = await db.execute(
+        select(Subscribe).where(
+            and_(
+                Subscribe.user_id == user_id,
+                Subscribe.end_date >= date.today(),
+            )
+        ).limit(1)
+    )
+    return result.scalar_one_or_none() is not None
+
+
 async def get_user_subscription_for_subject(
     db: AsyncSession,
     user_id: int,

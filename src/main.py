@@ -2,6 +2,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -30,6 +31,9 @@ app = FastAPI(
     openapi_url=f"{settings.API_V1_PREFIX}/openapi.json",
     lifespan=lifespan,
 )
+
+# Proxy headers (nginx → HTTPS)
+app.add_middleware(ProxyHeadersMiddleware, trusted_hosts=["*"])
 
 # CORS
 app.add_middleware(
