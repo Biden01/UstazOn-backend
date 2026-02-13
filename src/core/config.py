@@ -31,8 +31,8 @@ class Settings(BaseSettings):
         "http://localhost:8000",
         "http://localhost:3000",
         "http://185.129.51.101",
-        "https://agynservis.kz",
-        "https://www.agynservis.kz"
+        "https://ustazon.com",
+        "https://www.ustazon.com"
     ]
 
     @field_validator("BACKEND_CORS_ORIGINS", mode="before")

@@ -4,6 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.core.security import create_access_token, create_refresh_token, decode_token
 from src.db.session import get_db
 from src.schemas.user import (
+    CheckIinRequest,
     MessageResponse,
     ResetPasswordRequest,
     SendCodeRequest,
@@ -41,6 +42,12 @@ async def register(user_data: UserCreate, db: AsyncSession = Depends(get_db)):
     await user_service.create_user(db, user_data)
 
     return MessageResponse(message="Регистрация успешна. Пожалуйста, подтвердите номер телефона.", code="REGISTRATION_SUCCESS")
+
+
+@router.post("/check-iin")
+async def check_iin(data: CheckIinRequest, db: AsyncSession = Depends(get_db)):
+    user = await user_service.get_user_by_iin(db, data.iin)
+    return {"exists": user is not None}
 
 
 @router.post("/login", response_model=Token)

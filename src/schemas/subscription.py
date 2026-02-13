@@ -3,7 +3,29 @@ from typing import Optional, List
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from src.schemas.subject import SubjectResponse, InstitutionTypeResponse
+from src.schemas.subject import InstitutionTypeResponse
+
+
+class UserBrief(BaseModel):
+    id: int
+    name: str
+    iin: str
+    phone: str
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class SubjectBrief(BaseModel):
+    """Lightweight subject schema for subscription responses (no nested institution_types/windows)"""
+    id: int
+    name: str
+    code: str
+    image_url: Optional[str] = None
+    hero_image_url: Optional[str] = None
+    image_file: Optional[str] = None
+    hero_image_file: Optional[str] = None
+
+    model_config = ConfigDict(from_attributes=True)
 
 
 # Subscribe schemas
@@ -26,10 +48,11 @@ class SubscribeUpdate(BaseModel):
 
 class SubscribeResponse(SubscribeBase):
     id: int
-    created_at: datetime
-    updated_at: datetime
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
     is_active: bool
-    subject: Optional[SubjectResponse] = None
+    user: Optional[UserBrief] = None
+    subject: Optional[SubjectBrief] = None
     institution_type: Optional[InstitutionTypeResponse] = None
 
     model_config = ConfigDict(from_attributes=True)
@@ -68,7 +91,7 @@ class PageAccessResponse(PageAccessBase):
     id: int
     created_at: datetime
     updated_at: datetime
-    subject: Optional[SubjectResponse] = None
+    subject: Optional[SubjectBrief] = None
     institution_type: Optional[InstitutionTypeResponse] = None
 
     model_config = ConfigDict(from_attributes=True)

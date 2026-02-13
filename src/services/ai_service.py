@@ -54,7 +54,7 @@ class AIService:
             "requires_api_key": True
         },
         "claude-3-haiku": {
-            "name": "Claude 3 Haiku",
+            "name": "Claude 3.5 Haiku",
             "provider": "Anthropic",
             "description": "Быстрая модель от Anthropic",
             "cost": "low",
@@ -63,7 +63,6 @@ class AIService:
             "use_cases": ["Быстрые ответы", "Общение"],
             "requires_api_key": True
         },
-        # OpenAI GPT models (требуют API ключ)
         # OpenAI GPT models (требуют API ключ)
         "gpt-4o": {
             "name": "GPT-4o",
@@ -512,7 +511,7 @@ class AIService:
                 None,
                 partial(
                     self.client.models.generate_content,
-                    model=self.model_name,
+                    model=self.default_model,
                     contents=contents
                 )
             )

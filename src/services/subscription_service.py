@@ -25,7 +25,17 @@ async def create_subscription(
     db.add(subscription)
     await db.commit()
     await db.refresh(subscription)
-    return subscription
+    # Re-fetch with relationships loaded for response serialization
+    result = await db.execute(
+        select(Subscribe)
+        .options(
+            selectinload(Subscribe.user),
+            selectinload(Subscribe.subject),
+            selectinload(Subscribe.institution_type),
+        )
+        .where(Subscribe.id == subscription.id)
+    )
+    return result.scalar_one()
 
 
 async def get_subscription_by_id(
@@ -135,7 +145,17 @@ async def update_subscription(
     subscription.updated_at = datetime.utcnow()
     await db.commit()
     await db.refresh(subscription)
-    return subscription
+    # Re-fetch with relationships loaded for response serialization
+    result = await db.execute(
+        select(Subscribe)
+        .options(
+            selectinload(Subscribe.user),
+            selectinload(Subscribe.subject),
+            selectinload(Subscribe.institution_type),
+        )
+        .where(Subscribe.id == subscription.id)
+    )
+    return result.scalar_one()
 
 
 async def delete_subscription(
@@ -152,13 +172,13 @@ async def check_user_has_active_subscription(
     subject_id: int,
 ) -> bool:
     result = await db.execute(
-        select(Subscribe).where(
+        select(Subscribe.id).where(
             and_(
                 Subscribe.user_id == user_id,
                 Subscribe.subject_id == subject_id,
                 Subscribe.end_date >= date.today(),
             )
-        )
+        ).limit(1)
     )
     return result.scalar_one_or_none() is not None
 

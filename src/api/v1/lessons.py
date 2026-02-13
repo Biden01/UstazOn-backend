@@ -40,9 +40,10 @@ async def generate_lesson(
 
     Returns the lesson ID and the full JSON content.
     """
-    from src.api.v1.ai import check_rate_limit, log_generation_event
+    from src.api.v1.ai import check_ai_free_generator_limit, check_rate_limit, log_generation_event
 
     try:
+        await check_ai_free_generator_limit(current_user.id, db)
         check_rate_limit(current_user.id, "test")
         check_rate_limit(current_user.id, "global")
 

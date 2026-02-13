@@ -41,6 +41,8 @@ logger = logging.getLogger(__name__)
 
 
 FREE_AI_DAILY_LIMIT = 5
+FREE_GENERATOR_MONTHLY_LIMIT = 3
+MONTH_SECONDS = 30 * 86400  # 30 days
 
 
 async def check_ai_free_limit(user_id: int, db: AsyncSession) -> dict:
@@ -78,6 +80,42 @@ async def check_ai_free_limit(user_id: int, db: AsyncSession) -> dict:
 
     # Calculate remaining
     remaining = rate_limiter.get_remaining(key, max_requests=FREE_AI_DAILY_LIMIT, window_seconds=86400)
+    return {"is_subscriber": False, "remaining": remaining}
+
+
+async def check_ai_free_generator_limit(user_id: int, db: AsyncSession) -> dict:
+    """
+    Check if user can use AI generators (presentations, tests, lessons, etc.).
+    Free users: 2 generations per month.
+    Subscribers/admins: unlimited.
+    """
+    from src.services.user_service import get_user_by_id
+    user = await get_user_by_id(db, user_id)
+
+    if user and (user.is_admin or user.is_superuser):
+        return {"is_subscriber": True, "remaining": -1}
+
+    has_sub = await subscription_service.check_user_has_any_active_subscription(db, user_id)
+    if has_sub:
+        return {"is_subscriber": True, "remaining": -1}
+
+    # Free user — check monthly generator limit
+    key = f"rate_limit:ai_generator:free:{user_id}"
+    is_allowed, retry_after = rate_limiter.is_allowed(
+        key, max_requests=FREE_GENERATOR_MONTHLY_LIMIT, window_seconds=MONTH_SECONDS, user_id=user_id
+    )
+    if not is_allowed:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "code": "ai_free_limit_exceeded",
+                "message": f"Тегін лимит аяқталды ({FREE_GENERATOR_MONTHLY_LIMIT} генерация/ай). Жазылым алыңыз.",
+                "limit": FREE_GENERATOR_MONTHLY_LIMIT,
+                "retry_after": retry_after,
+            }
+        )
+
+    remaining = rate_limiter.get_remaining(key, max_requests=FREE_GENERATOR_MONTHLY_LIMIT, window_seconds=MONTH_SECONDS)
     return {"is_subscriber": False, "remaining": remaining}
 
 
@@ -276,6 +314,8 @@ async def chat_multi(
 
         return {"responses": results}
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error in chat_multi endpoint: {e}")
         raise HTTPException(
@@ -410,6 +450,24 @@ async def get_ai_usage(
     key = f"rate_limit:ai_chat:free:{current_user.id}"
     remaining = rate_limiter.get_remaining(key, max_requests=FREE_AI_DAILY_LIMIT, window_seconds=86400)
     return {"is_subscriber": False, "remaining": remaining, "limit": FREE_AI_DAILY_LIMIT}
+
+
+@router.get("/usage/generators")
+async def get_generator_usage(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Get current user's AI generator usage info (free limit remaining, subscriber status)"""
+    if current_user.is_admin or current_user.is_superuser:
+        return {"is_subscriber": True, "remaining": -1, "limit": FREE_GENERATOR_MONTHLY_LIMIT}
+
+    has_sub = await subscription_service.check_user_has_any_active_subscription(db, current_user.id)
+    if has_sub:
+        return {"is_subscriber": True, "remaining": -1, "limit": FREE_GENERATOR_MONTHLY_LIMIT}
+
+    key = f"rate_limit:ai_generator:free:{current_user.id}"
+    remaining = rate_limiter.get_remaining(key, max_requests=FREE_GENERATOR_MONTHLY_LIMIT, window_seconds=MONTH_SECONDS)
+    return {"is_subscriber": False, "remaining": remaining, "limit": FREE_GENERATOR_MONTHLY_LIMIT}
 
 
 @router.get("/prompts", response_model=dict)
@@ -724,6 +782,8 @@ async def send_message(
     Поддерживает текст и изображения (JPEG, PNG, WebP)
     """
     try:
+        await check_ai_free_limit(current_user.id, db)
+
         # Read uploaded images and documents
         images = []
         document_texts = []
@@ -780,7 +840,7 @@ async def send_message(
                 # If found, build history
                 if conversation and conversation.messages:
                     history = [
-                        {"role": msg.role, "parts": [{"text": msg.content}]}
+                        {"role": msg.role, "content": msg.content}
                         for msg in conversation.messages
                     ]
 
@@ -986,6 +1046,7 @@ async def generate_presentation_outline(
     topic: str = Form(...),
     slides_count: int = Form(12),
     model: str = Form("gemini-2.5-flash"),
+    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
     """
@@ -997,6 +1058,10 @@ async def generate_presentation_outline(
     Returns JSON structure of the presentation
     """
     try:
+        await check_ai_free_generator_limit(current_user.id, db)
+        check_rate_limit(current_user.id, "presentation")
+        check_rate_limit(current_user.id, "global")
+
         from src.prompts.teacher_prompts import QUICK_PROMPTS
         import json
         import re
@@ -1038,6 +1103,8 @@ async def generate_presentation_outline(
 
         return presentation_data
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error generating outline: {e}")
         raise HTTPException(
@@ -1165,6 +1232,7 @@ async def generate_presentation_gamma(
         {"id": <internal_id>, "gamma_document_id": "", "status": "pending"}
     """
     try:
+        await check_ai_free_generator_limit(current_user.id, db)
         check_rate_limit(current_user.id, "presentation")
         check_rate_limit(current_user.id, "global")
 
@@ -1173,7 +1241,7 @@ async def generate_presentation_gamma(
         if slides_count < 3 or slides_count > 15:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail="slides_count must be between 3 and 30"
+                detail="slides_count must be between 3 and 15"
             )
 
         # Save record immediately with status "pending" (Gamma not called yet)
@@ -1432,6 +1500,10 @@ async def generate_lesson_plan(
         DOCX файл с планом урока
     """
     try:
+        await check_ai_free_generator_limit(current_user.id, db)
+        check_rate_limit(current_user.id, "test")
+        check_rate_limit(current_user.id, "global")
+
         from fastapi.responses import StreamingResponse
         from src.models.teaching_materials import MaterialType
 
@@ -1478,6 +1550,7 @@ async def generate_test(
     question_count: int = Form(15),
     difficulty: str = Form("medium"),
     model: str = Form("gpt-4o-mini"),
+    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
     """
@@ -1495,7 +1568,7 @@ async def generate_test(
         DOCX файл с тестом
     """
     try:
-        # Apply rate limiting according to Task 6
+        await check_ai_free_generator_limit(current_user.id, db)
         check_rate_limit(current_user.id, "test")
         check_rate_limit(current_user.id, "global")
 
@@ -1644,6 +1717,7 @@ async def generate_test_to_db(
     Returns the created test with all questions and answers.
     """
     try:
+        await check_ai_free_generator_limit(current_user.id, db)
         check_rate_limit(current_user.id, "test")
         check_rate_limit(current_user.id, "global")
 
@@ -1736,6 +1810,10 @@ async def generate_homework(
         DOCX файл с домашним заданием
     """
     try:
+        await check_ai_free_generator_limit(current_user.id, db)
+        check_rate_limit(current_user.id, "test")
+        check_rate_limit(current_user.id, "global")
+
         from fastapi.responses import StreamingResponse
         from src.models.teaching_materials import MaterialType
 
@@ -1799,6 +1877,10 @@ async def generate_rubric(
         DOCX файл с критериями оценивания
     """
     try:
+        await check_ai_free_generator_limit(current_user.id, db)
+        check_rate_limit(current_user.id, "test")
+        check_rate_limit(current_user.id, "global")
+
         from fastapi.responses import StreamingResponse
         from src.models.teaching_materials import MaterialType
 
@@ -1843,13 +1925,14 @@ async def generate_manim_code(
     topic: str = Form(...),
     detail_level: str = Form("medium"),
     model: str = Form("gemini-2.5-flash"),
+    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """
     Generate Manim video for mathematical visualization.
     Returns JSON with video_url.
     """
-    # Rate limit (same as test generation)
+    await check_ai_free_generator_limit(current_user.id, db)
     check_rate_limit(current_user.id, "test")
     check_rate_limit(current_user.id, "global")
 

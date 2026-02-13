@@ -281,8 +281,8 @@ async def toggle_favorite(db: AsyncSession, card_id: int, user_id: int) -> Card 
         card.favorites.append(user)
 
     await db.commit()
-    await db.refresh(card)
-    return card
+    # Re-fetch with all relationships for CardDetailResponse serialization
+    return await get_card_by_id(db, card.id)
 
 
 async def get_user_favorites(

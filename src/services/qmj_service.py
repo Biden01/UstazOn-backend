@@ -91,7 +91,8 @@ async def create_qmj(db: AsyncSession, qmj_data: QMJCreate, author_id: int) -> Q
     db.add(qmj)
     await db.commit()
     await db.refresh(qmj)
-    return qmj
+    # Re-fetch with all relationships for QMJDetailResponse serialization
+    return await get_qmj_by_id(db, qmj.id)
 
 
 async def update_qmj(
@@ -126,7 +127,8 @@ async def update_qmj(
 
     await db.commit()
     await db.refresh(qmj)
-    return qmj
+    # Re-fetch with all relationships for QMJDetailResponse serialization
+    return await get_qmj_by_id(db, qmj.id)
 
 
 async def delete_qmj(db: AsyncSession, qmj_id: int) -> bool:
