@@ -62,6 +62,9 @@ class Settings(BaseSettings):
     # AI (Gamma)
     GAMMA_API_KEY: str = ""
 
+    # Unsplash
+    UNSPLASH_API_KEY: str = ""
+
     # Media files
     MEDIA_URL: str = "http://localhost:8000/media/"
 
