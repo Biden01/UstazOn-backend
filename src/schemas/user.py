@@ -132,5 +132,29 @@ class ResetPasswordRequest(BaseModel):
         return v
 
 
+class UserUpdate(BaseModel):
+    name: str | None = None
+    phone: str | None = None
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, v: str | None) -> str | None:
+        if v is not None and not re.match(r"^[а-яА-ЯёЁa-zA-Z\s\-]{2,50}$", v):
+            raise ValueError("Имя должно содержать от 2 до 50 символов")
+        return v
+
+    @field_validator("phone")
+    @classmethod
+    def validate_phone(cls, v: str | None) -> str | None:
+        if v is not None:
+            cleaned = re.sub(r"[^\d+]", "", v)
+            if not re.match(r"^\+?7\d{10}$", cleaned):
+                raise ValueError("Неверный формат телефона")
+            if not cleaned.startswith("+"):
+                cleaned = "+" + cleaned
+            return cleaned
+        return v
+
+
 class MessageResponse(BaseModel):
     message: str

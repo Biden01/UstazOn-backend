@@ -20,6 +20,8 @@ services:
     build:
       dockerfile: Dockerfile
     container_name: ustazon_backend
+    env_file:
+      - .env
     environment:
       DATABASE_URL: postgresql+asyncpg://postgres:postgres@db:5432/ustazon
       SECRET_KEY: your-super-secret-key-change-in-production

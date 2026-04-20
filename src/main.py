@@ -2,9 +2,12 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
+from src.admin import setup_admin
 from src.api.v1.router import api_router
 from src.core.config import settings
+from src.core.storage import UPLOAD_DIR
 from src.db.base import Base
 from src.db.session import engine
 from src.models import User, VerificationCode  # noqa: F401 - для создания таблиц
@@ -35,6 +38,13 @@ app.add_middleware(
 
 # Роуты
 app.include_router(api_router, prefix=settings.API_V1_PREFIX)
+
+# Админ-панель
+setup_admin(app)
+
+# Статическая раздача файлов
+app.mount("/uploads", StaticFiles(directory=str(UPLOAD_DIR)), name="uploads")
+app.mount("/media", StaticFiles(directory="media"), name="media")
 
 
 @app.get("/health")

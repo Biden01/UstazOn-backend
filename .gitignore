@@ -1,0 +1,15 @@
+__pycache__/
+*.pyc
+*.pyo
+.env
+!.env.example
+*.DS_Store
+.idea/
+venv/
+.venv/
+uploads/
+media/
+static/
+*.log
+alembic/__pycache__/
+alembic/versions/__pycache__/

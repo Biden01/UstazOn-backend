@@ -3,7 +3,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.security import get_password_hash, verify_password
 from src.models.user import User
-from src.schemas.user import UserCreate
+from src.schemas.user import UserCreate, UserUpdate
 
 
 async def get_user_by_iin(db: AsyncSession, iin: str) -> User | None:
@@ -53,6 +53,19 @@ async def update_user_password(db: AsyncSession, user: User, new_password: str) 
 
 async def verify_user_phone(db: AsyncSession, user: User) -> User:
     user.is_verified = True
+    await db.commit()
+    await db.refresh(user)
+    return user
+
+
+async def update_user_profile(
+    db: AsyncSession, user: User, user_data: UserUpdate
+) -> User:
+    if user_data.name is not None:
+        user.name = user_data.name
+    if user_data.phone is not None:
+        user.phone = user_data.phone
+        user.is_verified = False
     await db.commit()
     await db.refresh(user)
     return user
