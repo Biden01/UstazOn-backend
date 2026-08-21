@@ -1,3 +1,4 @@
+import ast
 import os
 import subprocess
 import logging
@@ -7,6 +8,62 @@ import uuid
 import re
 
 logger = logging.getLogger(__name__)
+
+# The code that reaches this service is written by an LLM from a
+# user-supplied topic, then executed as a real Python process (via manim).
+# That is a prompt-injection-to-RCE path: a user can steer the model into
+# emitting arbitrary Python. This denylist is defense-in-depth only, not a
+# real sandbox - it blocks the obvious escape routes (filesystem, network,
+# process spawning, dynamic code loading, reflection tricks). The actual fix
+# is to run this subprocess in an isolated, network-disabled, non-root,
+# resource-limited container/sandbox at the infrastructure level.
+DISALLOWED_MODULES = {
+    "os", "sys", "subprocess", "shutil", "socket", "ctypes", "importlib",
+    "pty", "pickle", "multiprocessing", "threading", "pathlib", "io",
+    "code", "inspect", "gc", "ftplib", "http", "urllib", "requests",
+    "asyncio", "signal", "resource", "sysconfig", "platform", "webbrowser",
+    "smtplib", "telnetlib", "sqlite3",
+}
+DISALLOWED_CALLS = {
+    "eval", "exec", "compile", "__import__", "open", "input", "globals",
+    "locals", "vars", "getattr", "setattr", "delattr", "exit", "quit",
+    "breakpoint",
+}
+
+
+class UnsafeManimCodeError(ValueError):
+    """Raised when AI-generated Manim code contains disallowed constructs."""
+
+
+def validate_manim_code_safety(code: str) -> None:
+    """
+    Reject AI-generated code that imports dangerous modules, calls dangerous
+    builtins, or reaches for dunder attributes commonly used to escape
+    restricted-exec sandboxes (e.g. ().__class__.__bases__).
+    """
+    try:
+        tree = ast.parse(code)
+    except SyntaxError as e:
+        raise UnsafeManimCodeError(f"Generated code has a syntax error: {e}")
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                root = alias.name.split(".")[0]
+                if root in DISALLOWED_MODULES:
+                    raise UnsafeManimCodeError(f"Disallowed import: {alias.name}")
+        elif isinstance(node, ast.ImportFrom):
+            root = (node.module or "").split(".")[0]
+            if root in DISALLOWED_MODULES:
+                raise UnsafeManimCodeError(f"Disallowed import: {node.module}")
+        elif isinstance(node, ast.Call):
+            func = node.func
+            if isinstance(func, ast.Name) and func.id in DISALLOWED_CALLS:
+                raise UnsafeManimCodeError(f"Disallowed call: {func.id}")
+            if isinstance(func, ast.Attribute) and func.attr in DISALLOWED_CALLS:
+                raise UnsafeManimCodeError(f"Disallowed call: {func.attr}")
+        elif isinstance(node, ast.Attribute) and node.attr.startswith("__") and node.attr.endswith("__"):
+            raise UnsafeManimCodeError(f"Disallowed dunder attribute access: {node.attr}")
 
 
 def sanitize_manim_code(code: str) -> str:
@@ -102,7 +159,10 @@ class ManimService:
         
         # Sanitize code to fix common AI errors
         code = sanitize_manim_code(code)
-        
+
+        # Reject obviously dangerous code before it ever touches disk/subprocess
+        validate_manim_code_safety(code)
+
         # Write code to file
         with open(script_path, "w", encoding="utf-8") as f:
             f.write(code)

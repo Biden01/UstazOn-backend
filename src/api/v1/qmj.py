@@ -165,9 +165,17 @@ async def delete_qmj_file(
     current_user: User = Depends(get_current_user),
 ):
     """Delete QMJ file attachment (only by uploader or QMJ author)"""
-    # TODO: Add authorization check
-    success = await qmj_service.delete_qmj_file(db, file_id)
-    if not success:
+    existing_file = await qmj_service.get_qmj_file_with_qmj(db, file_id)
+    if not existing_file:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="File not found"
         )
+    is_uploader = existing_file.uploaded_by_id == current_user.id
+    is_qmj_author = existing_file.qmj is not None and existing_file.qmj.author_id == current_user.id
+    if not (is_uploader or is_qmj_author):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You can only delete files you uploaded or files attached to your own QMJ",
+        )
+
+    await qmj_service.delete_qmj_file(db, file_id)

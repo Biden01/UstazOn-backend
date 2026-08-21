@@ -102,7 +102,7 @@ def parse_rubric_request(text: str) -> dict | None:
 
 
 @router.post("/chat", response_model=ChatResponse)
-async def chat(request: ChatRequest):
+async def chat(request: ChatRequest, current_user: User = Depends(get_current_user)):
     """
     Send a message to AI chatbot and get a response
 
@@ -150,7 +150,7 @@ async def chat(request: ChatRequest):
 
 
 @router.post("/chat/stream")
-async def chat_stream(request: ChatRequest):
+async def chat_stream(request: ChatRequest, current_user: User = Depends(get_current_user)):
     """
     Stream AI chat response in real-time
 

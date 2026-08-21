@@ -188,12 +188,18 @@ async def update_question(
     current_user: User = Depends(get_current_user),
 ):
     """Update question (only by test author)"""
-    # TODO: Add authorization check
-    question = await test_service.update_question(db, question_id, question_data)
-    if not question:
+    existing_question = await test_service.get_question_with_test(db, question_id)
+    if not existing_question:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Question not found"
         )
+    if existing_question.test.user_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You can only update questions in your own tests",
+        )
+
+    question = await test_service.update_question(db, question_id, question_data)
     return question
 
 
@@ -204,12 +210,18 @@ async def delete_question(
     current_user: User = Depends(get_current_user),
 ):
     """Delete question (only by test author)"""
-    # TODO: Add authorization check
-    success = await test_service.delete_question(db, question_id)
-    if not success:
+    existing_question = await test_service.get_question_with_test(db, question_id)
+    if not existing_question:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Question not found"
         )
+    if existing_question.test.user_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You can only delete questions from your own tests",
+        )
+
+    await test_service.delete_question(db, question_id)
 
 
 # Answer endpoints
@@ -221,12 +233,18 @@ async def add_answer_to_question(
     current_user: User = Depends(get_current_user),
 ):
     """Add an answer to question (only by test author)"""
-    # TODO: Add authorization check
-    answer = await test_service.add_answer_to_question(db, question_id, answer_data)
-    if not answer:
+    existing_question = await test_service.get_question_with_test(db, question_id)
+    if not existing_question:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Question not found"
         )
+    if existing_question.test.user_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You can only add answers to questions in your own tests",
+        )
+
+    answer = await test_service.add_answer_to_question(db, question_id, answer_data)
     return answer
 
 
@@ -238,12 +256,18 @@ async def update_answer(
     current_user: User = Depends(get_current_user),
 ):
     """Update answer (only by test author)"""
-    # TODO: Add authorization check
-    answer = await test_service.update_answer(db, answer_id, answer_data)
-    if not answer:
+    existing_answer = await test_service.get_answer_with_test(db, answer_id)
+    if not existing_answer:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Answer not found"
         )
+    if existing_answer.question.test.user_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You can only update answers in your own tests",
+        )
+
+    answer = await test_service.update_answer(db, answer_id, answer_data)
     return answer
 
 
@@ -254,12 +278,18 @@ async def delete_answer(
     current_user: User = Depends(get_current_user),
 ):
     """Delete answer (only by test author)"""
-    # TODO: Add authorization check
-    success = await test_service.delete_answer(db, answer_id)
-    if not success:
+    existing_answer = await test_service.get_answer_with_test(db, answer_id)
+    if not existing_answer:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Answer not found"
         )
+    if existing_answer.question.test.user_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You can only delete answers from your own tests",
+        )
+
+    await test_service.delete_answer(db, answer_id)
 
 
 # Test submission and grading

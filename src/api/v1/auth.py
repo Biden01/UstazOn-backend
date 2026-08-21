@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.core.rate_limit import rate_limit
 from src.core.security import create_access_token, create_refresh_token, decode_token
 from src.db.session import get_db
 from src.schemas.user import (
@@ -20,7 +21,11 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 
 @router.post("/register", response_model=MessageResponse)
-async def register(user_data: UserCreate, db: AsyncSession = Depends(get_db)):
+async def register(
+    user_data: UserCreate,
+    db: AsyncSession = Depends(get_db),
+    _rate_limit: None = Depends(rate_limit("register", max_calls=5, window_seconds=600)),
+):
     # Проверяем, существует ли пользователь с таким ИИН
     existing_user = await user_service.get_user_by_iin(db, user_data.iin)
     if existing_user:
@@ -44,7 +49,11 @@ async def register(user_data: UserCreate, db: AsyncSession = Depends(get_db)):
 
 
 @router.post("/login", response_model=Token)
-async def login(credentials: UserLogin, db: AsyncSession = Depends(get_db)):
+async def login(
+    credentials: UserLogin,
+    db: AsyncSession = Depends(get_db),
+    _rate_limit: None = Depends(rate_limit("login", max_calls=10, window_seconds=300)),
+):
     user = await user_service.authenticate_user(db, credentials.iin, credentials.password)
     if not user:
         raise HTTPException(
@@ -89,14 +98,20 @@ async def refresh_token(token_data: TokenRefresh, db: AsyncSession = Depends(get
 
 @router.post("/send-code", response_model=MessageResponse)
 async def send_verification_code(
-    data: SendCodeRequest, db: AsyncSession = Depends(get_db)
+    data: SendCodeRequest,
+    db: AsyncSession = Depends(get_db),
+    _rate_limit: None = Depends(rate_limit("send-code", max_calls=3, window_seconds=600)),
 ):
     await sms_service.create_verification_code(db, data.phone, purpose="verify")
     return MessageResponse(message="Код отправлен на указанный номер")
 
 
 @router.post("/verify-phone", response_model=MessageResponse)
-async def verify_phone(data: VerifyCodeRequest, db: AsyncSession = Depends(get_db)):
+async def verify_phone(
+    data: VerifyCodeRequest,
+    db: AsyncSession = Depends(get_db),
+    _rate_limit: None = Depends(rate_limit("verify-phone", max_calls=10, window_seconds=300)),
+):
     is_valid = await sms_service.verify_code(db, data.phone, data.code, purpose="verify")
     if not is_valid:
         raise HTTPException(
@@ -113,7 +128,11 @@ async def verify_phone(data: VerifyCodeRequest, db: AsyncSession = Depends(get_d
 
 
 @router.post("/forgot-password", response_model=MessageResponse)
-async def forgot_password(data: SendCodeRequest, db: AsyncSession = Depends(get_db)):
+async def forgot_password(
+    data: SendCodeRequest,
+    db: AsyncSession = Depends(get_db),
+    _rate_limit: None = Depends(rate_limit("forgot-password", max_calls=3, window_seconds=600)),
+):
     user = await user_service.get_user_by_phone(db, data.phone)
     if not user:
         # Не раскрываем, существует ли пользователь
@@ -124,7 +143,11 @@ async def forgot_password(data: SendCodeRequest, db: AsyncSession = Depends(get_
 
 
 @router.post("/verify-reset-code", response_model=MessageResponse)
-async def verify_reset_code(data: VerifyCodeRequest, db: AsyncSession = Depends(get_db)):
+async def verify_reset_code(
+    data: VerifyCodeRequest,
+    db: AsyncSession = Depends(get_db),
+    _rate_limit: None = Depends(rate_limit("verify-reset-code", max_calls=10, window_seconds=300)),
+):
     is_valid = await sms_service.check_code_valid(
         db, data.phone, data.code, purpose="reset_password"
     )
@@ -138,7 +161,11 @@ async def verify_reset_code(data: VerifyCodeRequest, db: AsyncSession = Depends(
 
 
 @router.post("/reset-password", response_model=MessageResponse)
-async def reset_password(data: ResetPasswordRequest, db: AsyncSession = Depends(get_db)):
+async def reset_password(
+    data: ResetPasswordRequest,
+    db: AsyncSession = Depends(get_db),
+    _rate_limit: None = Depends(rate_limit("reset-password", max_calls=10, window_seconds=300)),
+):
     # Проверяем и используем код
     is_valid = await sms_service.verify_code(
         db, data.phone, data.code, purpose="reset_password"

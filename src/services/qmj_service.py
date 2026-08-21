@@ -152,6 +152,16 @@ async def add_file_to_qmj(
     return qmj_file
 
 
+async def get_qmj_file_with_qmj(db: AsyncSession, file_id: int) -> QMJFile | None:
+    """Get QMJ file with its parent QMJ loaded, for ownership checks"""
+    result = await db.execute(
+        select(QMJFile)
+        .where(QMJFile.id == file_id)
+        .options(selectinload(QMJFile.qmj))
+    )
+    return result.scalar_one_or_none()
+
+
 async def delete_qmj_file(db: AsyncSession, file_id: int) -> bool:
     """Delete QMJ file attachment"""
     result = await db.execute(select(QMJFile).where(QMJFile.id == file_id))

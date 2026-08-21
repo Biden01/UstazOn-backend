@@ -17,13 +17,16 @@ class Settings(BaseSettings):
         return self.DATABASE_URL.replace("+asyncpg", "")
 
     # JWT
-    SECRET_KEY: str = "your-secret-key-change-in-production"
+    # No insecure default on purpose: a guessable SECRET_KEY lets anyone forge
+    # valid access tokens for any user (including admins). Set it via .env.
+    SECRET_KEY: str
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
 
     # CORS
-    BACKEND_CORS_ORIGINS: list[str] = ["http://localhost:5173", "http://localhost:8000", "http://localhost:3000", "http://185.129.51.101"]
+    # Production origins belong in .env, not hardcoded in source.
+    BACKEND_CORS_ORIGINS: list[str] = ["http://localhost:5173", "http://localhost:8000", "http://localhost:3000"]
 
     @field_validator("BACKEND_CORS_ORIGINS", mode="before")
     @classmethod

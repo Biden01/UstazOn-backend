@@ -118,6 +118,16 @@ async def delete_test(db: AsyncSession, test_id: int) -> bool:
 
 
 # Question CRUD
+async def get_question_with_test(db: AsyncSession, question_id: int) -> Question | None:
+    """Get question with its parent test loaded, for ownership checks"""
+    result = await db.execute(
+        select(Question)
+        .where(Question.id == question_id)
+        .options(selectinload(Question.test), selectinload(Question.answers))
+    )
+    return result.scalar_one_or_none()
+
+
 async def add_question_to_test(
     db: AsyncSession, test_id: int, question_data: QuestionCreate
 ) -> Question | None:
@@ -180,6 +190,16 @@ async def delete_question(db: AsyncSession, question_id: int) -> bool:
 
 
 # Answer CRUD
+async def get_answer_with_test(db: AsyncSession, answer_id: int) -> Answer | None:
+    """Get answer with its parent question and test loaded, for ownership checks"""
+    result = await db.execute(
+        select(Answer)
+        .where(Answer.id == answer_id)
+        .options(selectinload(Answer.question).selectinload(Question.test))
+    )
+    return result.scalar_one_or_none()
+
+
 async def add_answer_to_question(
     db: AsyncSession, question_id: int, answer_data: AnswerCreate
 ) -> Answer | None:

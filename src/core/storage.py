@@ -144,9 +144,16 @@ async def save_document(upload_file: UploadFile) -> str:
 
 
 def delete_file(file_path: str) -> bool:
-    """Delete file by path. Returns True if deleted, False if not found"""
+    """Delete file by path. Returns True if deleted, False if not found.
+
+    Only deletes files inside UPLOAD_DIR.parent - resolves the path first so
+    "../" segments can't be used to escape the uploads directory.
+    """
     try:
-        path = Path(file_path)
+        base_dir = UPLOAD_DIR.parent.resolve()
+        path = (base_dir / file_path).resolve()
+        if base_dir not in path.parents:
+            return False
         if path.exists() and path.is_file():
             path.unlink()
             return True
