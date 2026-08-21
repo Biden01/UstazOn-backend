@@ -1,7 +1,7 @@
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.core.security import get_password_hash, verify_password
+from src.core.security import get_password_hash, verify_and_upgrade_password
 from src.models.user import User
 from src.schemas.user import UserCreate, UserUpdate
 
@@ -39,8 +39,14 @@ async def authenticate_user(db: AsyncSession, iin: str, password: str) -> User |
     user = await get_user_by_iin(db, iin)
     if not user:
         return None
-    if not verify_password(password, user.hashed_password):
+    valid, new_hash = verify_and_upgrade_password(password, user.hashed_password)
+    if not valid:
         return None
+    if new_hash:
+        # Migrated (e.g. old Django pbkdf2_sha256) or otherwise deprecated
+        # hash - upgrade it to bcrypt now that we have the plaintext.
+        user.hashed_password = new_hash
+        await db.commit()
     return user
 
 
