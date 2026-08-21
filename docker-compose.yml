@@ -32,7 +32,13 @@ services:
       # MOBIZON_API_URL are loaded from .env via env_file above. Do not
       # hardcode secrets here - this file is committed to git.
     ports:
-      - "8000:8000"
+      # Loopback-only: host port 8000 is already taken by an unrelated
+      # process on this shared server, and the API shouldn't be reachable
+      # directly from the internet anyway - it belongs behind a reverse
+      # proxy that terminates TLS for the real domain. Nothing else on this
+      # host can reach past 127.0.0.1, so this stays isolated until that
+      # reverse proxy is wired up.
+      - "127.0.0.1:8010:8000"
     depends_on:
       db:
         condition: service_healthy
