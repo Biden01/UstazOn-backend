@@ -1,4 +1,5 @@
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -43,8 +44,10 @@ app.include_router(api_router, prefix=settings.API_V1_PREFIX)
 setup_admin(app)
 
 # Статическая раздача файлов
+MEDIA_DIR = Path("media")
+MEDIA_DIR.mkdir(exist_ok=True)
 app.mount("/uploads", StaticFiles(directory=str(UPLOAD_DIR)), name="uploads")
-app.mount("/media", StaticFiles(directory="media"), name="media")
+app.mount("/media", StaticFiles(directory=str(MEDIA_DIR)), name="media")
 
 
 @app.get("/health")
